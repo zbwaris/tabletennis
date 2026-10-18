@@ -7,10 +7,12 @@ export const K_NORMAL = 16;
 export const K_NEW = 48;
 export const NEW_PLAYER_NIGHTS = 4;
 export const BONUS_WINDOW = 8;
-// The table's only bonus: attendance, deliberately strong because participation is what the
-// club wants to reward. A missed tournament costs 2 × 20 = 40 against attending, about two bad
-// nights. Kept out of the rating so Elo stays zero-sum and every match is scored fairly.
-export const ATTEND_BONUS = 20;
+// The table's only bonus: attendance, zero-sum and deliberately strong because participation
+// is what the club wants to reward. At each tournament, everyone on the table who doesn't come
+// pays ABSENCE_COST, shared equally among those who came. On a typical night (about 3 of 14
+// away) skipping costs about 40 against attending, roughly two bad nights. Kept out of the
+// rating so every match is still scored fairly.
+export const ABSENCE_COST = 30;
 
 export const GROUP_LABELS = ['A', 'B', 'C', 'D'];
 // Knockout stages: semi-finals (SF), 3rd place match (3P, the two semi losers) and final (F).
@@ -136,21 +138,31 @@ export function compute(data) {
     closed.push(night);
   }
 
-  // Bonuses over the last 8 tournaments. Tournaments before a player's first one aren't missed.
+  // Attendance bonus per tournament. Who pays: anyone who came to at least one of the 8
+  // tournaments up to this one but not this one. Their payments are shared by the attendees.
+  const came = closed.map(n => nightInfo.get(n.id).attendees);
+  const settle = came.map((att, i) => {
+    const roster = new Set(came.slice(Math.max(0, i - BONUS_WINDOW + 1), i + 1).flatMap(s => [...s]));
+    const absent = new Set([...roster].filter(id => !att.has(id)));
+    return { absent, share: att.size ? (ABSENCE_COST * absent.size) / att.size : 0 };
+  });
+
+  // Each player's bonus: the sum over the last 8 tournaments.
   const windowStart = Math.max(0, closed.length - BONUS_WINDOW);
   const latest = closed.at(-1);
   const table = [], inactive = [];
   for (const p of data.players) {
     if (!first.has(p.id)) continue;
-    let attended = 0, missed = 0;
+    let attended = 0, missed = 0, earned = 0, paid = 0;
     for (let i = Math.max(windowStart, first.get(p.id)); i < closed.length; i++) {
-      nightInfo.get(closed[i].id).attendees.has(p.id) ? attended++ : missed++;
+      if (came[i].has(p.id)) { attended++; earned += settle[i].share; }
+      else if (settle[i].absent.has(p.id)) { missed++; paid += ABSENCE_COST; }
     }
-    const bonus = ATTEND_BONUS * (attended - missed);
+    const bonus = earned - paid;
     const lastInfo = latest && nightInfo.get(latest.id);
     const row = {
       id: p.id, name: p.name, rating: ratingOf(p.id), nights: nightsOf(p.id),
-      attended, missed, bonus, ladder: ratingOf(p.id) + bonus,
+      attended, missed, earned, paid, bonus, ladder: ratingOf(p.id) + bonus,
       lastChange: lastInfo?.attendees.has(p.id) ? lastInfo.change.get(p.id) : null,
     };
     (attended ? table : inactive).push(row);
