@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- handle -->
+  <rect x="40" y="33" width="10" height="24" rx="4.5" transform="rotate(-45 45 45)" fill="#b8793e"/>
+  <!-- blade -->
+  <circle cx="27" cy="27" r="20" fill="#d93a3f"/>
+  <circle cx="27" cy="27" r="20" fill="none" stroke="#a82a2e" stroke-width="2.5"/>
+  <circle cx="21" cy="20" r="7" fill="#ffffff" opacity="0.18"/>
+  <!-- ball -->
+  <circle cx="54" cy="11" r="7.5" fill="#ffa62b"/>
+  <circle cx="51.8" cy="8.8" r="2.4" fill="#ffffff" opacity="0.7"/>
+</svg>

@@ -46,11 +46,9 @@ const byName = (a, b) => nameOf(a).localeCompare(nameOf(b));
 
 const who = (id, sub = '') => `<span class="nm"><b>${esc(nameOf(id))}</b>${sub ? `<small>${sub}</small>` : ''}</span>`;
 const chg = (x, dp = 1) => `<span class="chg ${x > 0.05 ? 'up' : x < -0.05 ? 'down' : 'flat'}">${signed(x, dp)}</span>`;
-const formPills = (results, n = 5, big = false) =>
-  `<span class="form${big ? ' big' : ''}">${results.slice(-n).map(r => `<i class="${r.won ? 'w' : 'l'}">${r.won ? 'W' : 'L'}</i>`).join('')}</span>`;
 // A player's rating at the start of a tournament, small and grey, to show who's playing whom.
 const isGuest = id => !!app.data.players.find(p => p.id === id)?.guest;
-const startRating = (info, id) => (isGuest(id) ? '<small class="rt">guest</small>'
+const startRating = (info, id) => (isGuest(id) ? '<small class="rt guest">GUEST</small>'
   : info?.start.has(id) ? `<small class="rt">${Math.round(info.start.get(id))}</small>` : '');
 const tile = (label, value) => `<div class="tile"><span>${label}</span><b>${value}</b></div>`;
 const trophy = (cls = 'trophy') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v2h3v2a4 4 0 0 1-4 4h-.4A6 6 0 0 1 13 13.9V17h3v3H8v-3h3v-3.1A6 6 0 0 1 7.4 11H7a4 4 0 0 1-4-4V5h3V3Zm0 4H5a2 2 0 0 0 1.2 1.8L6 7Zm12 0-.2 1.8A2 2 0 0 0 19 7h-1Z"/></svg>`;
@@ -214,15 +212,15 @@ function viewTable() {
   const { table, inactive, closed } = app.calc;
   const open = openNight();
   const last = closed.at(-1);
-  let h = `<section class="page-head"><h1>Table</h1><p class="sub">${last ? `After ${plural(closed.length, 'tournament')} · last ${dayDate(last.date)}` : 'No tournaments played yet'}</p></section>`;
+  let h = `<section class="page-head"><h1>Ranking</h1><p class="sub">${last ? `After ${plural(closed.length, 'tournament')} · last ${dayDate(last.date)}` : 'No tournaments played yet'}</p></section>`;
   if (open) h += liveCard(open);
   if (last) h += lastTournamentCard(last);
   if (table.length) {
-    h += `<section class="card flush"><div class="lt-head"><span>#</span><span>Player</span><span class="form-col">Form</span><span>Score</span></div>
+    h += `<section class="card flush"><div class="lt-head"><span>#</span><span>Player</span><span>Score</span></div>
       ${table.map((r, i) => tableRow(r, i + 1)).join('')}</section>`;
   }
   if (inactive.length) {
-    h += `<details class="card"><summary>Not on the table (${inactive.length})</summary>
+    h += `<details class="card"><summary>Not in the ranking (${inactive.length})</summary>
       <p class="muted">No tournament in the last 8. Ratings are kept.</p>
       ${inactive.map(r => `<a class="list-row" href="${playerHref(r.id)}"><span></span>${who(r.id)}<span class="val">${Math.round(r.rating)}<small>rating</small></span></a>`).join('')}</details>`;
   }
@@ -241,7 +239,7 @@ function tableRow(r, pos) {
   const sub = r.debt ? `${Math.round(r.rating)} − ${r.debt} absence` : `${Math.round(r.rating)}`;
   return `<a class="lt-row p${pos}" href="${playerHref(r.id)}"><span class="pos">${pos}${move}</span>
     <span class="nm"><b>${esc(nameOf(r.id))}${tags}</b><small>${sub}</small></span>
-    ${formPills(app.stats.players.get(r.id)?.results ?? [])}<span class="pts">${Math.round(r.ladder)}</span></a>`;
+    <span class="pts">${Math.round(r.ladder)}</span></a>`;
 }
 
 function lastTournamentCard(night) {
@@ -336,9 +334,9 @@ function viewPlayer(id) {
   const s = app.stats.players.get(id);
   if (p.guest) {
     return `<section class="card profile"><div><h1>${esc(p.name)} <span class="tag">guest</span></h1>
-      <p class="sub">Guests play in tournaments, but their matches aren't rated and they aren't on the table.</p></div></section>${playerMatches(id)}`;
+      <p class="sub">Guests play in tournaments, but their matches aren't rated and they aren't in the ranking.</p></div></section>${playerMatches(id)}`;
   }
-  const sub = row ? `${pos >= 0 ? `${ordinal(pos + 1)} in the table` : 'Not on the table'} · ${plural(row.nights, 'tournament')}` : 'No tournaments yet';
+  const sub = row ? `${pos >= 0 ? `${ordinal(pos + 1)} in the ranking` : 'Not in the ranking'} · ${plural(row.nights, 'tournament')}` : 'No tournaments yet';
   let h = `<section class="card profile"><div><h1>${esc(p.name)}</h1><p class="sub">${sub}</p></div>
     ${row ? `<div class="rating-badge"><b>${Math.round(row.rating)}</b><small>Rating</small></div>` : ''}</section>`;
   if (!row) return h;
@@ -350,7 +348,6 @@ function viewPlayer(id) {
     ? `Absence debt ${row.debt}: ${row.debt / E.REPAYMENT === 1 ? 'one more tournament' : `${row.debt / E.REPAYMENT} more tournaments`} of attending to clear it (each pays back ${E.REPAYMENT}).`
     : 'No absence debt: score = rating.'}${left > 0 ? ` New player: rating changes are tripled for ${plural(left, 'more tournament')}.` : ''}</p>`;
 
-  if (s?.results.length) h += `<section class="card"><h2>Form <small>last ${Math.min(10, s.results.length)}</small></h2>${formPills(s.results, 10, true)}</section>`;
   const hist = history.get(id) || [];
   if (hist.length) {
     h += `<section class="card"><h2>Rating</h2>${ratingChart([{ label: 'Start', rating: E.START_RATING }, ...hist.map(x => ({ label: shortDate(x.date), rating: x.rating }))])}</section>`;
@@ -449,17 +446,17 @@ Change   = K × Weight × (1 − Expected)</pre>
 2-1: Weight = 0.75 + (Share − 0.5)
      kept between 0.75 and 0.95</pre>
     <p>Any 2-0 counts more than any 2-1, and the winner always gains.</p></section>
-  <section class="card prose"><h2>The table</h2>
+  <section class="card prose"><h2>The ranking</h2>
     <p>Score = rating − absence debt. This is a club where turning up counts. Every tournament you miss (since your first one) adds ${E.MISS_COST} to your debt, up to ${E.DEBT_CAP} (${E.DEBT_CAP / E.MISS_COST} misses). Every tournament you attend pays back ${E.REPAYMENT}. A regular has no debt, so their score is simply their rating.</p>
     <pre class="formula">Example: away 4 tournaments
 Debt on return         ${4 * E.MISS_COST}
 After 1 back           ${Math.max(0, 4 * E.MISS_COST - E.REPAYMENT)}
 After 2 back           ${Math.max(0, 4 * E.MISS_COST - 2 * E.REPAYMENT)}
 After 4 back           ${Math.max(0, 4 * E.MISS_COST - 4 * E.REPAYMENT)}  (cleared)</pre>
-    <p>A missed tournament costs more than a bad night usually does. Your rating itself never drops while you're away, so your matches are still scored fairly when you're back, but you'll sit lower on the table until you've been coming again. No tournament in the last 8 takes you off the table, but your rating is kept for when you return.</p>
+    <p>A missed tournament costs more than a bad night usually does. Your rating itself never drops while you're away, so your matches are still scored fairly when you're back, but you'll sit lower in the ranking until you've been coming again. No tournament in the last 8 takes you out of the ranking, but your rating is kept for when you return.</p>
     <p>Finishing places (winner, runner-up, 3rd) are honours, shown as ★ titles and on each tournament. They don't add points: the rating already counts every match it took to get there.</p></section>
   <section class="card prose"><h2>A tournament</h2>
-    <p>From 4 players: two groups, seeded by the table in a snake (1st, 4th, 5th, 8th… in A; 2nd, 3rd, 6th, 7th… in B) so both are equally strong. Then semis A1 v B2 and B1 v A2, a 3rd place match between the semi losers, and the final. Every match is rated the same way. Guests are seeded at the bottom and play like anyone else, knockout included, but matches involving a guest aren't rated. With fewer than 4 players: one group, then a final between the top 2. Group places go by matches won, then head-to-head, then game difference, then points difference.</p></section>
+    <p>From 4 players: two groups, seeded by the ranking in a snake (1st, 4th, 5th, 8th… in A; 2nd, 3rd, 6th, 7th… in B) so both are equally strong. Then semis A1 v B2 and B1 v A2, a 3rd place match between the semi losers, and the final. Every match is rated the same way. Guests are seeded at the bottom and play like anyone else, knockout included, but matches involving a guest aren't rated. With fewer than 4 players: one group, then a final between the top 2. Group places go by matches won, then head-to-head, then game difference, then points difference.</p></section>
   <section class="card"><h2>Try a match</h2>
     <form class="calc" id="calc">
       <label class="field">Player A rating <input name="ra" type="number" value="1000" inputmode="numeric"></label>
@@ -511,7 +508,7 @@ function playerChecklist(picked, attr) {
   const players = [...app.data.players].sort((a, b) => a.name.localeCompare(b.name));
   if (!players.length) return '<p class="muted">No players yet. Add everyone who\'s here below.</p>';
   return `<div class="checklist">${players.map(p => `<label><input type="checkbox" ${attr}="${esc(p.id)}"${picked.has(p.id) ? ' checked' : ''}>
-    <span>${esc(p.name)}</span><small>${p.guest ? 'guest' : nightsOf(p.id) ? Math.round(ratingOf(p.id)) : 'new'}</small></label>`).join('')}</div>`;
+    <span>${esc(p.name)}</span><small>${p.guest ? 'GUEST' : nightsOf(p.id) ? Math.round(ratingOf(p.id)) : 'new'}</small></label>`).join('')}</div>`;
 }
 
 const addPlayerForm = name => `<form class="add-row stack" data-form="${name}">
@@ -557,7 +554,7 @@ function desk(night) {
   if (semis.length) {
     const want = E.semiPairs(tables);
     const same = want && semis.every((m, i) => m.a === want[i][0] && m.b === want[i][1]);
-    if (!same && semis.every(fresh) && !final) ko += '<p class="notice">Group results changed after the semis were made. Redo them to match the tables.</p>';
+    if (!same && semis.every(fresh) && !final) ko += '<p class="notice">Group results changed after the semis were made. Redo them to match the standings.</p>';
     ko += `<div class="matches">${semis.map((m, i) => `<div class="stage-label">Semi-final ${i + 1}</div>${matchCard(night, m, { editable: true })}`).join('')}</div>`;
   }
   const playoff = night.matches.find(m => m.stage === '3P');
@@ -638,7 +635,7 @@ function editForm(night) {
     <section class="card"><h2>Groups <small>${two ? `A: ${e.groups[0].length} · B: ${e.groups[1].length}` : `${e.groups[0].length} players`}</small></h2>
       <div class="seg wide-seg"><button class="${two ? 'on' : ''}" data-act="editFormat" data-n="2">Two groups</button><button class="${two ? '' : 'on'}" data-act="editFormat" data-n="1">One group</button></div>
       ${two ? `<div class="grp-list">${groupRows}</div>` : '<p class="muted">Everyone plays everyone. With 4 or more players the top 4 go to the semis (1v4, 2v3).</p>'}
-      <button class="small redraw" data-act="editRedraw">Redraw groups from the table</button></section>
+      <button class="small redraw" data-act="editRedraw">Redraw groups from the ranking</button></section>
     <p class="notice">${impact}</p>
     <div class="btn-pair"><button data-act="editCancel">Cancel</button><button class="primary" data-act="editSave">Save changes</button></div>
     <section class="card"><h2>Delete tournament</h2><p class="muted">Removes this tournament and all its results.</p>
@@ -672,7 +669,7 @@ function viewSettings() {
     const players = [...app.data.players].sort((a, b) => a.name.localeCompare(b.name));
     h += `<section class="card"><h2>Players</h2><ul class="plain">${players.map(x => `<li class="between">${who(x.id)}
       <span class="row nowrap-row"><button class="small" data-act="toggleGuest" data-id="${esc(x.id)}">${x.guest ? 'Make member' : 'Make guest'}</button><button class="small" data-act="rename" data-id="${esc(x.id)}">Rename</button>${playerUsed(x.id) ? '' : `<button class="small danger" data-act="deletePlayer" data-id="${esc(x.id)}">Delete</button>`}</span></li>`).join('') || '<li class="muted">None yet.</li>'}</ul>
-      <p class="muted tiny">Guests play in tournaments, but none of their matches are rated and they aren't on the table. Switching someone re-scores all their past matches.</p></section>`;
+      <p class="muted tiny">Guests play in tournaments, but none of their matches are rated and they aren't in the ranking. Switching someone re-scores all their past matches.</p></section>`;
   } else {
     h += `<section class="card"><h2>Recorder sign-in</h2>
       <p class="muted" style="margin-bottom:12px">Only the person recording results needs this. Viewing the ranking needs nothing.</p>
@@ -698,7 +695,7 @@ function guessRepo() {
   return host && repo ? `${host[1]}/${repo}` : '';
 }
 
-const notFound = () => '<p class="empty">Not found. <a href="#/">Back to the table</a></p>';
+const notFound = () => '<p class="empty">Not found. <a href="#/">Back to the ranking</a></p>';
 
 // ---------- rendering ----------
 
@@ -777,7 +774,7 @@ function openScore(nightId, matchId) {
         <button class="small" data-act="unfinished">Unfinished</button>
         <button class="small danger" data-act="clearScore">Clear</button>
       </div>
-      <p class="muted tiny">Walkovers and unfinished matches don't change ratings. A walkover counts as a win in the group table.</p>
+      <p class="muted tiny">Walkovers and unfinished matches don't change ratings. A walkover counts as a win in the group standings.</p>
     </details>
   </form>`;
   dialog.showModal();
@@ -883,7 +880,7 @@ const actions = {
   makeSemis: () => {
     const night = openNight();
     const pending = night.matches.filter(m => E.isGroupStage(m.stage) && !E.isSettled(m)).length;
-    if (pending && !confirm(`${plural(pending, 'group match', 'group matches')} still ${pending === 1 ? 'has' : 'have'} no result. Make the semis from the tables as they are now?`)) return;
+    if (pending && !confirm(`${plural(pending, 'group match', 'group matches')} still ${pending === 1 ? 'has' : 'have'} no result. Make the semis from the standings as they are now?`)) return;
     const pairs = E.semiPairs(groupTables(night));
     if (!pairs) return alert('Each group needs at least 2 players for semi-finals.');
     update(`${night.date}: semi-finals made`, () => {
@@ -1018,8 +1015,8 @@ const actions = {
   toggleGuest: el => {
     const p = app.data.players.find(x => x.id === el.dataset.id);
     const msg = p.guest
-      ? `Make ${p.name} a member? Their past matches will be rated and they'll join the table.`
-      : `Make ${p.name} a guest? Their matches will no longer be rated (for them or their opponents) and they'll leave the table.`;
+      ? `Make ${p.name} a member? Their past matches will be rated and they'll join the ranking.`
+      : `Make ${p.name} a guest? Their matches will no longer be rated (for them or their opponents) and they'll leave the ranking.`;
     if (!confirm(msg)) return;
     update(`${p.name} is now a ${p.guest ? 'member' : 'guest'}`, () => {
       if (p.guest) delete p.guest; else p.guest = true;

@@ -35,8 +35,8 @@ body {
   min-width: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.45 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-feature-settings: "tnum" 1, "cv11" 1;
+  font: 15px/1.45 "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "tnum" 1;
   -webkit-font-smoothing: antialiased;
   padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px);
 }
@@ -60,8 +60,11 @@ svg { flex: none; }
   background: rgba(255, 255, 255, 0.92); backdrop-filter: saturate(1.6) blur(12px);
   border-bottom: 1px solid var(--line);
 }
-.brand { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 800; font-size: 1.05rem; letter-spacing: -0.02em; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ball { width: 22px; height: 22px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, #fff 0 18%, #ffb347 19%, #ff7a00 100%); box-shadow: inset -2px -2px 0 rgba(0, 0, 0, 0.08); }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--ink); min-width: 0; }
+.brand img { flex: none; width: 34px; height: 34px; }
+.brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.1; }
+.brand-text b { font-weight: 800; font-size: 1.02rem; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand-text small { font-size: 0.66rem; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.16em; }
 .top-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 .icon-btn { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--ink-2); }
 .icon-btn:active { background: var(--line); }
@@ -126,19 +129,9 @@ details.more[open] > summary { margin-bottom: 8px; }
 .chg.up { background: var(--win-soft); }
 .chg.down { background: var(--loss-soft); }
 .chg.flat { background: var(--line); color: var(--muted); }
-.form { display: flex; gap: 3px; }
-.form i {
-  width: 17px; height: 17px; border-radius: 5px; display: grid; place-items: center; font-style: normal;
-  font-size: 0.6rem; font-weight: 800; color: #fff; background: var(--line-2);
-}
-.form i.w { background: var(--win); }
-.form i.l { background: var(--loss); }
-.form.big i { width: 24px; height: 24px; font-size: 0.72rem; border-radius: 7px; }
 
 /* ---------- league table ---------- */
-.lt-head, .lt-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 97px 46px; align-items: center; gap: 8px; padding: 0 14px; }
-.lt-row .form { justify-content: flex-end; }
-.lt-head .form-col { text-align: right; }
+.lt-head, .lt-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 56px; align-items: center; gap: 8px; padding: 0 14px; }
 .lt-head { font-size: 0.68rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding-top: 8px; padding-bottom: 8px; }
 .lt-head span:last-child, .lt-row .pts { text-align: right; }
 .lt-row { position: relative; color: var(--ink); padding-top: 9px; padding-bottom: 9px; border-top: 1px solid var(--line); }
@@ -156,10 +149,6 @@ details.more[open] > summary { margin-bottom: 8px; }
 .nm b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nm small { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pts { font-weight: 800; font-size: 1.02rem; }
-@media (max-width: 350px) {
-  .lt-head, .lt-row { grid-template-columns: 30px minmax(0, 1fr) 46px; }
-  .lt-head .form-col, .lt-row .form { display: none; }
-}
 
 /* group tables */
 .gt-head, .gt-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 24px 24px 34px 38px; align-items: center; gap: 6px; padding: 0 14px; }
@@ -188,6 +177,7 @@ button.mc:active { background: var(--accent-soft); }
 .mc-side .sub { display: flex; align-items: center; gap: 6px; }
 .mc-side.a .sub { flex-direction: row-reverse; }
 .rt { color: var(--muted); font-weight: 500; font-size: 0.72rem; letter-spacing: 0; }
+.rt.guest { font-weight: 700; letter-spacing: 0.05em; }
 .score-grid > b .rt { display: block; font-size: 0.7rem; }
 .mc-side.lose { color: var(--ink-2); }
 .mc-score { display: flex; align-items: center; gap: 4px; font-weight: 800; font-size: 1.1rem; background: var(--card); border-radius: 8px; padding: 4px 9px; box-shadow: var(--shadow); }
