@@ -10,5 +10,29 @@
    "name": "Zaid"
   }
  ],
- "nights": []
+ "nights": [
+  {
+   "id": "2026-10-18",
+   "date": "2026-10-18",
+   "closed": false,
+   "attendees": [
+    "p3wi9t0",
+    "pkrk2v3"
+   ],
+   "groups": [
+    [
+     "pkrk2v3",
+     "p3wi9t0"
+    ]
+   ],
+   "matches": [
+    {
+     "id": "A1",
+     "stage": "A",
+     "a": "pkrk2v3",
+     "b": "p3wi9t0"
+    }
+   ]
+  }
+ ]
 }
