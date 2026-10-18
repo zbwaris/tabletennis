@@ -2,11 +2,12 @@ import * as E from './engine.js';
 import { buildStats } from './stats.js';
 import { loadPublished, loadConfig, saveConfig, forgetConfig, getFile, Recorder } from './store.js';
 
+// In the data a tournament is called a "night"; on screen it's always "tournament".
 const view = document.getElementById('view');
 const dialog = document.getElementById('scoreDialog');
 const app = {
   data: null, calc: null, stats: null, prevPos: new Map(), names: new Map(),
-  recorder: null, notice: '', draft: null,
+  recorder: null, notice: '', draft: null, edit: null,
 };
 
 // ---------- helpers ----------
@@ -14,7 +15,7 @@ const app = {
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nameOf = id => app.names.get(id) ?? 'Unknown';
 const playerHref = id => `#/player/${encodeURIComponent(id)}`;
-const nightHref = id => `#/night/${encodeURIComponent(id)}`;
+const nightHref = id => `#/tournament/${encodeURIComponent(id)}`;
 const fmtDate = (d, opts = { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) =>
   new Date(`${d}T12:00:00`).toLocaleDateString('en-GB', opts);
 const shortDate = d => fmtDate(d, { day: 'numeric', month: 'short' });
@@ -24,7 +25,7 @@ const signed = (x, dp = 1) => {
   return v === 0 ? (0).toFixed(dp) : (v > 0 ? '+' : '−') + Math.abs(v).toFixed(dp);
 };
 const pct = x => `${Math.round(x * 100)}%`;
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
 const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
 const today = () => {
   const d = new Date();
@@ -36,33 +37,30 @@ const openNight = () => app.data.nights.find(n => !n.closed);
 const findNight = id => app.data.nights.find(n => n.id === id);
 const groupMatches = (night, label) => night.matches.filter(m => m.stage === label);
 const groupTables = night => night.groups.map((ids, i) => E.standings(ids, groupMatches(night, E.GROUP_LABELS[i])));
+const hasResult = m => !!(m.games || m.walkover || m.unfinished);
 const newId = prefix => prefix + Math.random().toString(36).slice(2, 8);
 const setsOf = (m, id) => m.games.filter(g => (id === m.a ? g[0] > g[1] : g[1] > g[0])).length;
+const byName = (a, b) => nameOf(a).localeCompare(nameOf(b));
 
-// Player "crests": coloured initials, the same colour everywhere.
-const PALETTE = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d',
-  '#ea580c', '#4f46e5', '#0d9488', '#be123c', '#9333ea', '#0284c7'];
-const colorOf = id => {
-  let h = 7;
-  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return PALETTE[h % PALETTE.length];
-};
-const initials = name => {
-  const w = name.trim().split(/\s+/).filter(Boolean);
-  return w.length > 1 ? w[0][0] + w.at(-1)[0] : (w[0] || '?')[0];
-};
-const avatar = (id, size = 28) =>
-  `<span class="av" style="--s:${size}px;background:${colorOf(id)}" aria-hidden="true">${esc(initials(nameOf(id)))}</span>`;
-const who = (id, sub = '', size = 28) =>
-  `<span class="who">${avatar(id, size)}<span class="nm"><b>${esc(nameOf(id))}</b>${sub ? `<small>${sub}</small>` : ''}</span></span>`;
+const who = (id, sub = '') => `<span class="nm"><b>${esc(nameOf(id))}</b>${sub ? `<small>${sub}</small>` : ''}</span>`;
 const chg = (x, dp = 1) => `<span class="chg ${x > 0.05 ? 'up' : x < -0.05 ? 'down' : 'flat'}">${signed(x, dp)}</span>`;
 const formPills = (results, n = 5, big = false) =>
   `<span class="form${big ? ' big' : ''}">${results.slice(-n).map(r => `<i class="${r.won ? 'w' : 'l'}">${r.won ? 'W' : 'L'}</i>`).join('')}</span>`;
+// A player's rating at the start of a tournament, small and grey, to show who's playing whom.
+const startRating = (info, id) => (info?.start.has(id) ? `<small class="rt">${Math.round(info.start.get(id))}</small>` : '');
 const tile = (label, value) => `<div class="tile"><span>${label}</span><b>${value}</b></div>`;
-const trophy = '<svg class="trophy" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v2h3v2a4 4 0 0 1-4 4h-.4A6 6 0 0 1 13 13.9V17h3v3H8v-3h3v-3.1A6 6 0 0 1 7.4 11H7a4 4 0 0 1-4-4V5h3V3Zm0 4H5a2 2 0 0 0 1.2 1.8L6 7Zm12 0-.2 1.8A2 2 0 0 0 19 7h-1Z"/></svg>';
+const trophy = (cls = 'trophy') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v2h3v2a4 4 0 0 1-4 4h-.4A6 6 0 0 1 13 13.9V17h3v3H8v-3h3v-3.1A6 6 0 0 1 7.4 11H7a4 4 0 0 1-4-4V5h3V3Zm0 4H5a2 2 0 0 0 1.2 1.8L6 7Zm12 0-.2 1.8A2 2 0 0 0 19 7h-1Z"/></svg>`;
+const placeName = bonus => ({ [E.WIN_BONUS]: 'winner', [E.FINAL_BONUS]: 'finalist', [E.SEMI_BONUS]: 'semi-finalist' }[bonus]);
+
+// Groups are seeded by table position: Score for players on the table, otherwise rating.
+function rankScore() {
+  const score = new Map(app.calc.table.map(r => [r.id, r.ladder]));
+  return id => score.get(id) ?? app.calc.ratingOf(id);
+}
+const drawGroups = ids => E.seedGroups(ids, rankScore(), nameOf);
 
 function groupPlan(n) {
-  if (n <= 10) return `one group of ${n}, top 4 to the semis`;
+  if (n < 4) return 'one group, then a final between the top 2';
   const a = Math.ceil(n / 2), b = Math.floor(n / 2);
   return `two groups (${a === b ? `${a} each` : `${a} and ${b}`}), top 2 of each to the semis`;
 }
@@ -75,7 +73,7 @@ function refresh() {
   render();
 }
 
-// Table positions before the last Friday, for the movement arrows.
+// Table positions before the last tournament, for the movement arrows.
 function previousPositions() {
   const last = app.calc.closed.at(-1);
   if (!last) return new Map();
@@ -92,13 +90,45 @@ function update(message, mutate, { throttle = false } = {}) {
 
 // ---------- shared pieces ----------
 
-function matchCard(night, m, { editable = false, stage = false } = {}) {
+// Playing order for the group stage: round by round, alternating groups (A round 1, B round 1,
+// A round 2, ...). Fixtures are stored in round-robin order, so nobody plays twice in a round.
+function playOrder(night) {
+  const order = [];
+  night.groups.forEach((g, gi) => {
+    const perRound = Math.max(1, Math.floor(g.length / 2));
+    groupMatches(night, E.GROUP_LABELS[gi]).forEach((m, i) => order.push({ m, round: Math.floor(i / perRound), gi, i }));
+  });
+  order.sort((x, y) => x.round - y.round || x.gi - y.gi || x.i - y.i);
+  return order.map(x => x.m);
+}
+
+// "Match 7 · Group A": the number is the match's place in the playing order.
+function queueLabel(night, order, m) {
+  if (!E.isGroupStage(m.stage)) return m.stage === 'F' ? 'Final' : `Semi-final ${m.id.slice(2)}`;
+  return `Match ${order.indexOf(m) + 1}${night.groups.length > 1 ? ` · ${groupName(night, m.stage)}` : ''}`;
+}
+
+function upNext(night, { editable = false, limit = Infinity, knockout = true } = {}) {
+  const order = playOrder(night);
+  const ko = knockout ? night.matches.filter(m => !E.isGroupStage(m.stage)) : [];
+  const todo = [...order, ...ko].filter(m => !E.isSettled(m));
+  if (!todo.length) return '';
+  const shown = todo.slice(0, limit);
+  return `<section class="card"><h2>Up next <small>${plural(todo.length, 'match', 'matches')} to play</small></h2>
+    <div class="matches">${shown.map((m, i) => `${i === 0 ? '<div class="stage-label next">Next</div>' : ''}${matchCard(night, m, { editable, prefix: queueLabel(night, order, m) })}`).join('')}</div>
+    ${todo.length > shown.length ? `<details class="more"><summary>The rest (${todo.length - shown.length})</summary><div class="matches">${todo.slice(limit).map(m => matchCard(night, m, { prefix: queueLabel(night, order, m) })).join('')}</div></details>` : ''}</section>`;
+}
+
+function matchCard(night, m, { editable = false, stage = false, prefix = '' } = {}) {
   const o = E.outcome(m);
-  const d = app.calc.nightInfo.get(night.id)?.details.get(m.id);
+  const info = app.calc.nightInfo.get(night.id);
+  const d = info?.details.get(m.id);
+  // Under each name: the rating they started the tournament with, then the change from this match.
   const side = (id, pos) => {
     const state = o ? (o.winner === id ? 'win' : 'lose') : '';
     const c = d ? (d.winner === id ? d.gain : -d.loss) : null;
-    return `<span class="mc-side ${pos} ${state}">${avatar(id, 26)}<span class="nm"><b>${esc(nameOf(id))}</b>${c != null ? chg(c) : ''}</span></span>`;
+    return `<span class="mc-side ${pos} ${state}"><b>${esc(nameOf(id))}</b>
+      <span class="sub">${startRating(info, id)}${c != null ? chg(c) : ''}</span></span>`;
   };
   let score = '<span class="mc-score vs">VS</span>';
   if (o?.rated) score = `<span class="mc-score"><b>${setsOf(m, m.a)}</b><span>–</span><b>${setsOf(m, m.b)}</b></span>`;
@@ -108,6 +138,7 @@ function matchCard(night, m, { editable = false, stage = false } = {}) {
     : m.games ? m.games.map(g => g.join('-')).join(' · ')
     : editable ? '<span class="cta">Tap to enter score</span>' : 'Not played yet';
   if (stage && !E.isGroupStage(m.stage)) line = `${stageName(night, m)} · ${line}`;
+  if (prefix) line = `<span class="qn">${prefix}</span> · ${line}`;
   const body = `${side(m.a, 'a')}${score}${side(m.b, 'b')}<span class="mc-games">${line}</span>`;
   return editable
     ? `<button class="mc" data-act="score" data-night="${esc(night.id)}" data-match="${esc(m.id)}">${body}</button>`
@@ -115,33 +146,31 @@ function matchCard(night, m, { editable = false, stage = false } = {}) {
 }
 
 function groupTable(night, table) {
-  const places = night.groups.length === 1 ? 4 : 2;
-  const marks = night.attendees.length >= 4;
+  const places = night.groups.length === 1 ? (night.attendees.length >= 4 ? 4 : 2) : 2;
+  const info = app.calc.nightInfo.get(night.id);
   return `<div class="gt-head"><span>#</span><span>Player</span><span>W</span><span>L</span><span>G±</span><span>P±</span></div>
-    ${table.map(r => `<a class="gt-row${marks && r.pos <= places ? ' q' : ''}" href="${playerHref(r.id)}"><span>${r.pos}</span>
-      <span class="who">${avatar(r.id, 22)}<b>${esc(nameOf(r.id))}</b></span>
+    ${table.map(r => `<a class="gt-row${r.pos <= places ? ' q' : ''}" href="${playerHref(r.id)}"><span>${r.pos}</span>
+      <span class="nm"><b>${esc(nameOf(r.id))} ${startRating(info, r.id)}</b></span>
       <span>${r.won}</span><span>${r.lost}</span><span>${signed(r.gd, 0)}</span><span>${signed(r.pd, 0)}</span></a>`).join('')}
-    ${marks ? '<div class="legend">Semi-final places</div>' : ''}`;
+    <div class="legend">${places === 4 ? 'Semi-final places' : night.groups.length === 1 ? 'Final places' : 'Semi-final places'}</div>`;
 }
 
 function bracket(night) {
   const semis = night.matches.filter(m => m.stage === 'SF');
   const final = night.matches.find(m => m.stage === 'F');
   const box = (m, label) => {
-    if (!m) {
-      const tbd = '<div class="bm-row tbd"><span class="av" style="--s:20px;background:var(--line-2)"></span><b>To be decided</b><em></em></div>';
-      return `<div class="bm"><div class="bm-label">${label}</div>${tbd}${tbd}</div>`;
-    }
+    if (!m) return `<div class="bm"><div class="bm-label">${label}</div><div class="bm-row tbd"><b>To be decided</b></div><div class="bm-row tbd"><b>To be decided</b></div></div>`;
     const o = E.outcome(m);
+    const info = app.calc.nightInfo.get(night.id);
     const mark = id => (m.games && o ? setsOf(m, id) : m.walkover === id ? 'W/O' : '');
-    const row = id => `<a class="bm-row${o?.winner === id ? ' win' : ''}" href="${playerHref(id)}">${avatar(id, 20)}<b>${esc(nameOf(id))}</b><em>${mark(id)}</em></a>`;
+    const row = id => `<a class="bm-row${o?.winner === id ? ' win' : ''}" href="${playerHref(id)}"><b>${esc(nameOf(id))} ${startRating(info, id)}</b><em>${mark(id)}</em></a>`;
     return `<div class="bm"><div class="bm-label">${label}</div>${row(m.a)}${row(m.b)}</div>`;
   };
-  if (!semis.length) return box(final, 'Final');
+  if (!semis.length) return box(final, `${trophy()} Final`);
   return `<div class="bracket">
     <div class="br-col semis">${box(semis[0], 'Semi-final 1')}${box(semis[1], 'Semi-final 2')}</div>
     <div class="br-join"></div><div class="br-stem"></div>
-    <div class="br-col final">${box(final, `${trophy} Final`)}</div></div>`;
+    <div class="br-col final">${box(final, `${trophy()} Final`)}</div></div>`;
 }
 
 function changesList(night) {
@@ -149,7 +178,8 @@ function changesList(night) {
   const ids = [...info.attendees].sort((a, b) => info.change.get(b) - info.change.get(a));
   return ids.map(id => {
     const start = info.start.get(id), c = info.change.get(id);
-    const notes = [info.unbeaten === id ? 'unbeaten night' : '', info.k.get(id) === E.K_NEW ? 'new · changes ×3' : ''].filter(Boolean).join(' · ');
+    const place = info.placing.get(id);
+    const notes = [place ? `${placeName(place)} +${place} bonus` : '', info.k.get(id) === E.K_NEW ? 'new · changes ×3' : ''].filter(Boolean).join(' · ');
     return `<a class="ch-row" href="${playerHref(id)}">${who(id, notes)}<span class="flow">${Math.round(start)} → <b>${Math.round(start + c)}</b></span>${chg(c)}</a>`;
   }).join('');
 }
@@ -162,13 +192,13 @@ function progress(night) {
 function liveCard(night) {
   const p = progress(night);
   return `<a class="card live-card" href="${nightHref(night.id)}">
-    <div class="row1"><b><span class="dot"></span>Tonight</b><span class="tag live">Live</span></div>
+    <div class="row1"><b><span class="dot"></span>Tournament in progress</b><span class="tag live">Live</span></div>
     <p class="muted">${plural(night.attendees.length, 'player')} · ${p.done} of ${p.total} matches played</p>
     <div class="bar"><span style="width:${p.pct}%"></span></div></a>`;
 }
 
 function dateStrip(activeId) {
-  return `<nav class="strip" id="strip" aria-label="Fridays">${app.calc.nights.map(n => `<a class="chip${n.id === activeId ? ' active' : ''}" href="${nightHref(n.id)}">
+  return `<nav class="strip" id="strip" aria-label="Tournaments">${app.calc.nights.map(n => `<a class="chip${n.id === activeId ? ' active' : ''}" href="${nightHref(n.id)}">
     <small>${n.closed ? fmtDate(n.date, { weekday: 'short' }) : '<span class="dot"></span>Live'}</small><b>${shortDate(n.date)}</b></a>`).join('')}</nav>`;
 }
 
@@ -178,82 +208,87 @@ function viewTable() {
   const { table, inactive, closed } = app.calc;
   const open = openNight();
   const last = closed.at(-1);
-  let h = `<section class="page-head"><h1>Table</h1><p class="sub">${last ? `After ${plural(closed.length, 'Friday')} · last played ${dayDate(last.date)}` : 'No Fridays played yet'}</p></section>`;
+  let h = `<section class="page-head"><h1>Table</h1><p class="sub">${last ? `After ${plural(closed.length, 'tournament')} · last ${dayDate(last.date)}` : 'No tournaments played yet'}</p></section>`;
   if (open) h += liveCard(open);
-  if (last) h += lastFridayCard(last);
+  if (last) h += lastTournamentCard(last);
   if (table.length) {
     h += `<section class="card flush"><div class="lt-head"><span>#</span><span>Player</span><span class="form-col">Form</span><span>Score</span></div>
       ${table.map((r, i) => tableRow(r, i + 1)).join('')}</section>`;
   }
   if (inactive.length) {
     h += `<details class="card"><summary>Not on the table (${inactive.length})</summary>
-      <p class="muted">No Friday in the last 8. Ratings are kept.</p>
+      <p class="muted">No tournament in the last 8. Ratings are kept.</p>
       ${inactive.map(r => `<a class="list-row" href="${playerHref(r.id)}"><span></span>${who(r.id)}<span class="val">${Math.round(r.rating)}<small>rating</small></span></a>`).join('')}</details>`;
   }
-  if (table.length) h += '<p class="foot">Score = rating + bonus (shown under each name). The bonus counts the last 8 Fridays: +5 for each one attended, −5 for each one missed, +10 for an unbeaten night. <a href="#/rules">How it works</a></p>';
+  if (table.length) {
+    h += `<p class="foot">Score = rating + bonus (shown under each name). The bonus counts the last 8 tournaments: +5 for each one attended, −5 for each one missed, and +${E.SEMI_BONUS} for reaching the semis, +${E.FINAL_BONUS} the final, +${E.WIN_BONUS} for winning. <a href="#/rules">How it works</a></p>`;
+  }
   return h;
 }
 
 function tableRow(r, pos) {
   const prev = app.prevPos.get(r.id);
   const move = prev == null || prev === pos ? '' : prev > pos ? `<i class="up">▲${prev - pos}</i>` : `<i class="down">▼${pos - prev}</i>`;
+  const titles = app.stats.players.get(r.id)?.titles ?? 0;
   const tags = (r.nights < E.NEW_PLAYER_NIGHTS ? ' <span class="tag">new</span>' : '') +
-    (r.unbeaten ? ` <span class="tag gold">★${r.unbeaten > 1 ? r.unbeaten : ''}</span>` : '');
+    (titles ? ` <span class="tag gold" title="Tournaments won">★${titles > 1 ? titles : ''}</span>` : '');
   const sub = `${Math.round(r.rating)} ${r.bonus < 0 ? '−' : '+'} ${Math.abs(r.bonus)}`;
   return `<a class="lt-row p${pos}" href="${playerHref(r.id)}"><span class="pos">${pos}${move}</span>
-    <span class="who">${avatar(r.id)}<span class="nm"><b>${esc(nameOf(r.id))}${tags}</b><small>${sub}</small></span></span>
+    <span class="nm"><b>${esc(nameOf(r.id))}${tags}</b><small>${sub}</small></span>
     ${formPills(app.stats.players.get(r.id)?.results ?? [])}<span class="pts">${Math.round(r.ladder)}</span></a>`;
 }
 
-function lastFridayCard(night) {
+function lastTournamentCard(night) {
   const info = app.calc.nightInfo.get(night.id);
   if (!info.champion) return '';
-  const final = night.matches.find(m => m.stage === 'F');
-  const o = E.outcome(final);
+  const o = E.outcome(night.matches.find(m => m.stage === 'F'));
   const line = o.rated ? `Beat ${esc(nameOf(o.loser))} ${o.gamesWon}–${o.gamesLost} in the final` : 'Won the final';
-  return `<a class="card hero-mini" href="${nightHref(night.id)}"><div class="label">Last Friday · ${dayDate(night.date)}</div>
-    <div class="body">${avatar(info.champion, 44)}<div><b>${esc(nameOf(info.champion))}</b> ${trophy}${info.unbeaten ? ' <span class="tag gold">unbeaten</span>' : ''}
-    <br><small class="muted">${line}</small></div><span class="chev">›</span></div></a>`;
+  return `<a class="card hero-mini" href="${nightHref(night.id)}"><div class="label">Last tournament · ${dayDate(night.date)}</div>
+    <div class="body">${trophy('trophy big')}<div><b>${esc(nameOf(info.champion))}</b><br><small class="muted">${line}</small></div><span class="chev">›</span></div></a>`;
 }
 
-function viewFridays() {
+function viewTournaments() {
   const latest = app.calc.nights.at(-1);
-  return latest ? viewNight(latest.id) : '<section class="page-head"><h1>Fridays</h1></section><p class="empty">No Fridays recorded yet.</p>';
+  return latest ? viewNight(latest.id) : '<section class="page-head"><h1>Tournaments</h1></section><p class="empty">No tournaments recorded yet.</p>';
 }
 
 function viewNight(id) {
   const night = findNight(id);
   if (!night) return notFound();
   const info = app.calc.nightInfo.get(id);
-  let h = dateStrip(id) + nightHero(night, info);
+  let h = dateStrip(id) + tournamentHero(night, info);
   if (app.recorder) {
     h += night.closed
-      ? `<button class="wide" data-act="reopenNight" data-night="${esc(id)}">Reopen to correct results</button>`
+      ? `<div class="btn-pair"><button data-act="reopenNight" data-night="${esc(id)}">Reopen to correct or edit</button>
+         <button class="danger" data-act="deleteNight" data-night="${esc(id)}">Delete</button></div>`
       : '<a class="button primary wide" href="#/record">Record results</a>';
   }
+  if (!night.closed) h += upNext(night, { limit: 6 });
   const ko = night.matches.filter(m => !E.isGroupStage(m.stage));
   if (ko.length) {
     h += `<section class="card"><h2>Knockout</h2>${bracket(night)}
       <details class="more"><summary>Scores</summary><div class="matches">${ko.map(m => matchCard(night, m, { stage: true })).join('')}</div></details></section>`;
   }
+  const order = playOrder(night);
   groupTables(night).forEach((t, i) => {
     const label = E.GROUP_LABELS[i];
-    const ms = groupMatches(night, label);
+    const ms = order.filter(m => m.stage === label);
     h += `<section class="card flush"><h2>${groupName(night, label)}</h2>${groupTable(night, t)}
-      <div class="pad"><details class="more"><summary>Results (${ms.filter(E.isSettled).length})</summary>
-      <div class="matches">${ms.map(m => matchCard(night, m)).join('')}</div></details></div></section>`;
+      <div class="pad"><details class="more"><summary>Results (${ms.filter(E.isSettled).length} of ${ms.length})</summary>
+      <div class="matches">${ms.map(m => matchCard(night, m, { prefix: queueLabel(night, order, m) })).join('')}</div></details></div></section>`;
   });
   h += `<section class="card"><h2>Rating changes${night.closed ? '' : ' <small>provisional</small>'}</h2>${changesList(night)}</section>`;
   return h;
 }
 
-function nightHero(night, info) {
+function tournamentHero(night, info) {
   const d = [...info.details.values()];
   const points = d.reduce((s, x) => s + x.pointsWon + x.pointsLost, 0);
   let champ;
   if (info.champion) {
-    champ = `<a class="champ" href="${playerHref(info.champion)}">${avatar(info.champion, 64)}<small>${trophy} Winner</small>
-      <b>${esc(nameOf(info.champion))}</b>${info.unbeaten ? '<span class="tag gold">Unbeaten · +10 bonus</span>' : ''}</a>`;
+    champ = `<div class="champ">${trophy('trophy hero')}<small>Winner</small>
+      <a href="${playerHref(info.champion)}"><b>${esc(nameOf(info.champion))}</b></a>
+      <span class="runner">Runner-up <a href="${playerHref(info.runnerUp)}">${esc(nameOf(info.runnerUp))}</a></span></div>`;
   } else if (night.closed) {
     champ = '<div class="champ"><small>No final recorded</small></div>';
   } else {
@@ -277,7 +312,7 @@ function ratingChart(points) {
   const area = `${line}L${x(points.length - 1).toFixed(1)},${H - B}L${x(0).toFixed(1)},${H - B}Z`;
   const label = v => `<text x="${L - 6}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end">${Math.round(v)}</text>`;
   const top = Math.max(...ys), bottom = Math.min(...ys);
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rating after each Friday">
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rating after each tournament">
     <defs><linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#00a464" stop-opacity="0.22"/><stop offset="1" stop-color="#00a464" stop-opacity="0"/></linearGradient></defs>
     <line class="base" x1="${L}" x2="${W - R}" y1="${y(E.START_RATING).toFixed(1)}" y2="${y(E.START_RATING).toFixed(1)}"/>
     ${label(E.START_RATING)}${top - E.START_RATING > 14 ? label(top) : ''}${E.START_RATING - bottom > 14 ? label(bottom) : ''}
@@ -293,15 +328,15 @@ function viewPlayer(id) {
   const pos = table.findIndex(r => r.id === id);
   const row = table[pos] || inactive.find(r => r.id === id);
   const s = app.stats.players.get(id);
-  const sub = row ? `${pos >= 0 ? `${ordinal(pos + 1)} in the table` : 'Not on the table'} · ${plural(row.nights, 'Friday')}` : 'No Fridays yet';
-  let h = `<section class="card profile">${avatar(id, 60)}<div><h1>${esc(p.name)}</h1><p class="sub">${sub}</p></div>
+  const sub = row ? `${pos >= 0 ? `${ordinal(pos + 1)} in the table` : 'Not on the table'} · ${plural(row.nights, 'tournament')}` : 'No tournaments yet';
+  let h = `<section class="card profile"><div><h1>${esc(p.name)}</h1><p class="sub">${sub}</p></div>
     ${row ? `<div class="rating-badge"><b>${Math.round(row.rating)}</b><small>Rating</small></div>` : ''}</section>`;
   if (!row) return h;
 
   h += `<div class="tiles">${tile('Score', Math.round(row.ladder))}${tile('Bonus', signed(row.bonus, 0))}${tile('Won–lost', s ? `${s.won}–${s.lost}` : '0–0')}
-    ${tile('Win rate', s?.played ? pct(s.winPct) : '–')}${tile('Points won', s?.played ? pct(s.avgShare) : '–')}${tile('Best streak', s?.bestStreak ?? 0)}</div>`;
+    ${tile('Win rate', s?.played ? pct(s.winPct) : '–')}${tile('Titles', s?.titles ?? 0)}${tile('Best streak', s?.bestStreak ?? 0)}</div>`;
   const left = E.NEW_PLAYER_NIGHTS - nightsOf(id);
-  h += `<p class="foot">Bonus over the last 8 Fridays: ${row.attended} attended (${signed(5 * row.attended, 0)}), ${row.missed} missed (${signed(-5 * row.missed, 0)}), ${row.unbeaten} unbeaten (${signed(10 * row.unbeaten, 0)}).${left > 0 ? ` New player: rating changes are tripled for ${plural(left, 'more Friday')}.` : ''}</p>`;
+  h += `<p class="foot">Bonus over the last 8 tournaments: ${row.attended} attended (${signed(5 * row.attended, 0)}), ${row.missed} missed (${signed(-5 * row.missed, 0)}), knockout places ${signed(row.knockout, 0)}.${left > 0 ? ` New player: rating changes are tripled for ${plural(left, 'more tournament')}.` : ''}</p>`;
 
   if (s?.results.length) h += `<section class="card"><h2>Form <small>last ${Math.min(10, s.results.length)}</small></h2>${formPills(s.results, 10, true)}</section>`;
   const hist = history.get(id) || [];
@@ -314,7 +349,7 @@ function viewPlayer(id) {
 
 function highlights(s) {
   const rows = [];
-  const hl = (id, k, v, right = '') => `<a class="hl" href="${playerHref(id)}">${avatar(id, 36)}<div><div class="k">${k}</div><div class="v">${v}</div></div>${right}</a>`;
+  const hl = (id, k, v, right = '') => `<a class="hl" href="${playerHref(id)}"><div><div class="k">${k}</div><div class="v">${v}</div></div>${right}</a>`;
   if (s.bestWin) {
     const r = s.bestWin;
     rows.push(hl(r.opp, 'Best win', `Beat ${esc(nameOf(r.opp))} ${r.d.gamesWon}–${r.d.gamesLost} · ${pct(r.d.expected)} chance`, chg(r.change)));
@@ -330,11 +365,10 @@ function highlights(s) {
 
 function headToHead(s) {
   const opps = [...s.h2h].sort(([, a], [, b]) => (b.w + b.l) - (a.w + a.l) || b.w - a.w);
-  const row = ([opp, r]) => `<a class="h2h-row" href="${playerHref(opp)}">${who(opp, `${r.w + r.l} ${r.w + r.l === 1 ? 'match' : 'matches'}`)}
+  const row = ([opp, r]) => `<a class="h2h-row" href="${playerHref(opp)}">${who(opp, plural(r.w + r.l, 'match', 'matches'))}
     <span class="rec">${r.w}–${r.l}</span><span class="split"><span style="width:${(100 * r.w) / (r.w + r.l)}%"></span></span></a>`;
-  const first = opps.slice(0, 6).map(row).join('');
   const rest = opps.slice(6);
-  return `<section class="card"><h2>Head-to-head <small>won–lost</small></h2>${first}
+  return `<section class="card"><h2>Head-to-head <small>won–lost</small></h2>${opps.slice(0, 6).map(row).join('')}
     ${rest.length ? `<details class="more"><summary>All opponents (${opps.length})</summary>${rest.map(row).join('')}</details>` : ''}</section>`;
 }
 
@@ -348,36 +382,36 @@ function playerMatches(id) {
   }
   if (!blocks.length) return '';
   return `<section class="card"><h2>Matches</h2>${blocks[0]}
-    ${blocks.length > 1 ? `<details class="more"><summary>Earlier Fridays (${blocks.length - 1})</summary>${blocks.slice(1).join('')}</details>` : ''}</section>`;
+    ${blocks.length > 1 ? `<details class="more"><summary>Earlier tournaments (${blocks.length - 1})</summary>${blocks.slice(1).join('')}</details>` : ''}</section>`;
 }
 
 function viewStats() {
   const { players, upsets, nightGains, totals } = app.stats;
   let h = '<section class="page-head"><h1>Stats</h1>';
-  if (!totals.fridays) return h + '</section><p class="empty">Stats appear after the first Friday.</p>';
-  h += `<p class="sub">${plural(totals.fridays, 'Friday')} so far</p></section>`;
+  if (!totals.fridays) return h + '</section><p class="empty">Stats appear after the first tournament.</p>';
+  h += `<p class="sub">${plural(totals.fridays, 'tournament')} so far</p></section>`;
   h += `<div class="tiles">${tile('Matches', totals.matches)}${tile('Games', totals.games)}${tile('Points', totals.points.toLocaleString('en-GB'))}</div>`;
   const all = [...players.values()];
   const regular = all.filter(s => s.played >= 8);
+  h += leaderCard('Tournament wins', all, s => s.titles, v => v);
   h += leaderCard('Most wins', all, s => s.won, v => v);
   h += leaderCard('Win rate', regular, s => s.winPct, pct, 'min. 8 matches');
   h += leaderCard('Longest winning streak', all, s => s.bestStreak, v => v);
   h += leaderCard('Share of points won', regular, s => s.avgShare, pct, 'min. 8 matches');
-
   if (upsets.length) {
     h += `<section class="card"><h2>Biggest upsets <small>chance of winning</small></h2>${upsets.slice(0, 5).map((u, i) => `
       <a class="list-row upset${i === 0 ? ' lead' : ''}" href="${nightHref(u.night.id)}"><span class="rk">${i + 1}</span>
-      ${who(u.d.winner, `beat ${esc(nameOf(u.d.loser))} ${u.d.gamesWon}–${u.d.gamesLost} · ${shortDate(u.night.date)}`, i === 0 ? 40 : 28)}
+      ${who(u.d.winner, `beat ${esc(nameOf(u.d.loser))} ${u.d.gamesWon}–${u.d.gamesLost} · ${shortDate(u.night.date)}`)}
       <span class="val">${pct(u.d.expected)}<small>${signed(u.d.gain)}</small></span></a>`).join('')}</section>`;
   }
   if (nightGains.length) {
-    h += `<section class="card"><h2>Best single nights <small>rating gained</small></h2>${nightGains.slice(0, 5).map((g, i) => `
+    h += `<section class="card"><h2>Best tournaments <small>rating gained</small></h2>${nightGains.slice(0, 5).map((g, i) => `
       <a class="list-row${i === 0 ? ' lead' : ''}" href="${nightHref(g.night.id)}"><span class="rk">${i + 1}</span>
-      ${who(g.id, dayDate(g.night.date), i === 0 ? 40 : 28)}<span class="val up">${signed(g.change)}</span></a>`).join('')}</section>`;
+      ${who(g.id, dayDate(g.night.date))}<span class="val up">${signed(g.change)}</span></a>`).join('')}</section>`;
   }
+  h += leaderCard('Finals reached', all, s => s.finals, v => v);
   h += leaderCard('Most 2-0 wins', all, s => s.twoNil, v => v);
-  h += leaderCard('Unbeaten nights', all, s => s.unbeaten, v => v);
-  h += leaderCard('Most Fridays played', all, s => s.nights, v => v);
+  h += leaderCard('Most tournaments played', all, s => s.nights, v => v);
   return h;
 }
 
@@ -385,7 +419,7 @@ function leaderCard(title, list, value, fmt, note = '') {
   const top = list.filter(s => value(s) > 0).sort((a, b) => value(b) - value(a)).slice(0, 5);
   if (!top.length) return '';
   return `<section class="card"><h2>${title}${note ? ` <small>${note}</small>` : ''}</h2>${top.map((s, i) => `
-    <a class="list-row${i === 0 ? ' lead' : ''}" href="${playerHref(s.id)}"><span class="rk">${i + 1}</span>${who(s.id, '', i === 0 ? 40 : 28)}
+    <a class="list-row${i === 0 ? ' lead' : ''}" href="${playerHref(s.id)}"><span class="rk">${i + 1}</span>${who(s.id)}
     <span class="val">${fmt(value(s))}</span></a>`).join('')}</section>`;
 }
 
@@ -395,7 +429,7 @@ function viewRules() {
     <p>Everyone starts at 1000. After every match the winner takes points from the loser:</p>
     <pre class="formula">Expected = 1/(1 + 10^((L − W)/400))
 Change   = K × Weight × (1 − Expected)</pre>
-    <p>W and L are the winner's and loser's ratings. <b>Expected</b> is how likely the winner was to win, so beating someone rated higher is worth more. <b>K</b> is 16, or 48 for a player's first 4 Fridays so new players find their level quickly. Ratings update once at the end of the night, using the ratings everyone arrived with.</p></section>
+    <p>W and L are the winner's and loser's ratings. <b>Expected</b> is how likely the winner was to win, so beating someone rated higher is worth more. <b>K</b> is 16, or 48 for a player's first 4 tournaments so new players find their level quickly. Ratings update once at the end of the tournament, using the ratings everyone arrived with.</p></section>
   <section class="card prose"><h2>Weight: how convincing the win was</h2>
     <pre class="formula">Share = winner's points / all points
 2-0: Weight = 1 + 2 × (Share − 0.5)
@@ -404,9 +438,15 @@ Change   = K × Weight × (1 − Expected)</pre>
      kept between 0.75 and 0.95</pre>
     <p>Any 2-0 counts more than any 2-1, and the winner always gains.</p></section>
   <section class="card prose"><h2>The table</h2>
-    <p>Score = rating + bonus. The bonus counts the last 8 Fridays: +5 for each one attended, −5 for each one missed (only since your first night), +10 for an unbeaten night (every group match, the semi and the final). No Friday in the last 8 takes you off the table, but your rating is kept.</p></section>
-  <section class="card prose"><h2>A night</h2>
-    <p>8–10 players: one group, then semis 1v4 and 2v3. 11–20 players: two groups seeded by rating in a snake, then semis A1 v B2 and B1 v A2. Group places go by matches won, then head-to-head, then game difference, then points difference.</p></section>
+    <p>Score = rating + bonus. The bonus counts the last 8 tournaments:</p>
+    <pre class="formula">Attended            +5 each
+Missed              −5 each
+Reached the semis   +${E.SEMI_BONUS}
+Reached the final   +${E.FINAL_BONUS}
+Won the tournament  +${E.WIN_BONUS}</pre>
+    <p>Missed tournaments only count from your first one. The knockout bonus makes up for the rating a semi-final loss costs, so reaching the knockout never leaves you worse off. No tournament in the last 8 takes you off the table, but your rating is kept.</p></section>
+  <section class="card prose"><h2>A tournament</h2>
+    <p>From 4 players: two groups, seeded by the table in a snake (1st, 4th, 5th, 8th… in A; 2nd, 3rd, 6th, 7th… in B) so both are equally strong. Then semis A1 v B2 and B1 v A2, and the final. With fewer than 4 players: one group, then a final between the top 2. Group places go by matches won, then head-to-head, then game difference, then points difference.</p></section>
   <section class="card"><h2>Try a match</h2>
     <form class="calc" id="calc">
       <label class="field">Player A rating <input name="ra" type="number" value="1000" inputmode="numeric"></label>
@@ -449,52 +489,53 @@ function viewRecord() {
     return '<section class="page-head"><h1>Record</h1></section><p class="empty">Recording needs a sign-in on this phone. <a href="#/settings">Set it up in Settings</a>.</p>';
   }
   const night = openNight();
-  return night ? nightDesk(night) : startForm();
+  if (!night) return startForm();
+  return app.edit?.nightId === night.id ? editForm(night) : desk(night);
+}
+
+function playerChecklist(picked, attr) {
+  const { ratingOf, nightsOf } = app.calc;
+  const players = [...app.data.players].sort((a, b) => a.name.localeCompare(b.name));
+  if (!players.length) return '<p class="muted">No players yet. Add everyone who\'s here below.</p>';
+  return `<div class="checklist">${players.map(p => `<label><input type="checkbox" ${attr}="${esc(p.id)}"${picked.has(p.id) ? ' checked' : ''}>
+    <span>${esc(p.name)}</span><small>${nightsOf(p.id) ? Math.round(ratingOf(p.id)) : 'new'}</small></label>`).join('')}</div>`;
 }
 
 function startForm() {
-  const { ratingOf, nightsOf } = app.calc;
   if (!app.draft) app.draft = { date: today(), picked: new Set() };
-  const players = [...app.data.players].sort((a, b) => a.name.localeCompare(b.name));
-  let h = '<section class="page-head"><h1>Start a Friday</h1><p class="sub">Tick who\'s here, then start the night</p></section>';
-  h += `<section class="card"><label class="field">Date <input type="date" id="nightDate" value="${esc(app.draft.date)}"></label></section>`;
-  h += '<section class="card"><h2>Who\'s here?</h2>';
-  h += players.length
-    ? `<div class="checklist">${players.map(p => `<label><input type="checkbox" data-pick="${esc(p.id)}"${app.draft.picked.has(p.id) ? ' checked' : ''}>
-        ${avatar(p.id, 22)}<span>${esc(p.name)}</span><small>${nightsOf(p.id) ? Math.round(ratingOf(p.id)) : 'new'}</small></label>`).join('')}</div>`
-    : '<p class="muted">No players yet. Add everyone who\'s here below.</p>';
-  h += `<form class="row" data-form="addPlayer" style="margin-top:10px"><input name="name" placeholder="New player's name" autocomplete="off" required><button>Add</button></form></section>`;
-  h += `<p id="plan" class="plan foot">${planText()}</p>`;
-  h += '<button class="primary wide" data-act="startNight">Start night</button>';
-  return h;
+  return `<section class="page-head"><h1>Start a tournament</h1><p class="sub">Tick who's playing. You can change players and groups later.</p></section>
+    <section class="card"><label class="field">Date <input type="date" id="nightDate" value="${esc(app.draft.date)}"></label></section>
+    <section class="card"><h2>Who's playing?</h2>${playerChecklist(app.draft.picked, 'data-pick')}
+      <form class="row add-row" data-form="addPlayer"><input name="name" placeholder="New player's name" autocomplete="off" required><button>Add</button></form></section>
+    <p id="plan" class="plan foot">${planText(app.draft.picked.size)}</p>
+    <button class="primary wide" data-act="startNight">Start tournament</button>`;
 }
 
-function planText() {
-  const n = app.draft.picked.size;
+function planText(n) {
   if (n < 2) return 'Tick at least 2 players.';
-  const warn = n < 8 || n > 20 ? ' <span class="warn">(the rules are written for 8–20)</span>' : '';
-  return `${plural(n, 'player')}: ${groupPlan(n)}.${warn}`;
+  return `${plural(n, 'player')}: ${groupPlan(n)}.`;
 }
 
-function nightDesk(night) {
+function desk(night) {
   const tables = groupTables(night);
   const p = progress(night);
-  let h = `<section class="page-head"><h1>Tonight</h1><p class="sub">${dayDate(night.date)} · ${plural(night.attendees.length, 'player')}</p></section>
+  let h = `<section class="page-head head-row"><div><h1>Live tournament</h1><p class="sub">${dayDate(night.date)} · ${plural(night.attendees.length, 'player')}</p></div>
+    <button data-act="editStart">Edit</button></section>
     <section class="card"><div class="between"><b>${p.done} of ${p.total} matches played</b><span class="tag live">Live</span></div>
     <div class="bar"><span style="width:${p.pct}%"></span></div></section>`;
+  h += upNext(night, { editable: true, knockout: false });
+  const order = playOrder(night);
   tables.forEach((t, i) => {
     const label = E.GROUP_LABELS[i];
     const ms = groupMatches(night, label);
-    const done = ms.filter(E.isSettled), todo = ms.filter(m => !E.isSettled(m));
-    h += `<section class="card flush"><h2>${groupName(night, label)} <small>${done.length}/${ms.length} played</small></h2><div class="pad">
-      ${todo.length ? `<div class="matches">${todo.map(m => matchCard(night, m, { editable: true })).join('')}</div>` : '<p class="muted">All group matches played.</p>'}
-      ${done.length ? `<details class="more"><summary>Played (${done.length}) · tap one to correct it</summary><div class="matches">${done.map(m => matchCard(night, m, { editable: true })).join('')}</div></details>` : ''}
-      </div><div class="sub-h">Table</div>${groupTable(night, t)}</section>`;
+    const done = order.filter(m => m.stage === label && E.isSettled(m));
+    h += `<section class="card flush"><h2>${groupName(night, label)} <small>${done.length}/${ms.length} played</small></h2>${groupTable(night, t)}
+      ${done.length ? `<div class="pad"><details class="more"><summary>Played (${done.length}) · tap one to correct it</summary><div class="matches">${done.map(m => matchCard(night, m, { editable: true, prefix: queueLabel(night, order, m) })).join('')}</div></details></div>` : ''}</section>`;
   });
 
   const semis = night.matches.filter(m => m.stage === 'SF');
   const final = night.matches.find(m => m.stage === 'F');
-  const fresh = m => !m.games && !m.walkover && !m.unfinished;
+  const fresh = m => !hasResult(m);
   let ko = '';
   if (semis.length) {
     const want = E.semiPairs(tables);
@@ -504,8 +545,9 @@ function nightDesk(night) {
   }
   if (final) ko += `<div class="matches"><div class="stage-label">Final</div>${matchCard(night, final, { editable: true })}</div>`;
   const buttons = [];
+  const canSemis = E.semiPairs(tables);
   if (!semis.length && !final) {
-    buttons.push(night.attendees.length >= 4
+    buttons.push(canSemis
       ? '<button class="primary" data-act="makeSemis">Make semi-finals</button>'
       : '<button class="primary" data-act="makeFinal">Make final</button>');
   }
@@ -514,26 +556,86 @@ function nightDesk(night) {
     if (semis.every(fresh)) buttons.push('<button data-act="redoSemis">Redo semi-finals</button>');
   }
   if (final && fresh(final)) buttons.push('<button data-act="redoFinal">Redo final</button>');
-  if (buttons.length) ko += `<div class="row" style="margin-top:10px">${buttons.join('')}</div>`;
-  h += `<section class="card"><h2>Knockout</h2>${ko || '<p class="muted">Semi-finals are made from the group tables.</p>'}</section>`;
-
-  const absent = app.data.players.filter(x => !night.attendees.includes(x.id)).sort((a, b) => a.name.localeCompare(b.name));
-  h += `<details class="card"><summary>Late arrival or someone leaving</summary>
-    <form class="stack" data-form="lateArrival">
-      <p class="muted">A late arrival joins the smaller group and gets fixtures against everyone in it.</p>
-      <select name="id"><option value="">Pick a player…</option>${absent.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select>
-      <input name="name" placeholder="…or a new player's name" autocomplete="off">
-      <button>Add to tonight</button>
-    </form>
-    <form class="stack" data-form="removePlayer" style="margin-top:16px">
-      <p class="muted">Remove someone ticked by mistake (only if they have no results tonight). If someone leaves part-way, mark their remaining matches as unfinished instead.</p>
-      <select name="id" required><option value="">Pick a player…</option>${night.attendees.map(id => `<option value="${esc(id)}">${esc(nameOf(id))}</option>`).join('')}</select>
-      <button>Remove from tonight</button>
-    </form></details>`;
-  h += `<details class="card"><summary>Rating changes so far</summary><p class="muted">Applied when you close the night.</p>${changesList(night)}</details>`;
-  h += `<button class="primary wide" data-act="closeNight">Close night and update ratings</button>
-    <button class="danger wide" data-act="deleteNight" data-night="${esc(night.id)}">Delete night</button>`;
+  if (buttons.length) ko += `<div class="row ko-buttons">${buttons.join('')}</div>`;
+  h += `<section class="card"><h2>Knockout</h2>${ko || ''}</section>`;
+  h += `<details class="card"><summary>Rating changes so far</summary><p class="muted">Applied when you finish the tournament.</p>${changesList(night)}</details>`;
+  h += '<button class="primary wide" data-act="closeNight">Finish tournament and update ratings</button>';
   return h;
+}
+
+// ----- editing a live tournament: date, players, groups -----
+
+function startEdit(night) {
+  app.edit = {
+    nightId: night.id, date: night.date,
+    picked: new Set(night.attendees),
+    groups: night.groups.map(g => [...g]),
+  };
+}
+
+// New fixtures for the edited groups. A result already entered is kept whenever the same
+// two players are still in the same group; the knockout is reset if anything changed.
+function planRebuild(night, groups) {
+  const key = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  const played = new Map(night.matches.filter(m => E.isGroupStage(m.stage) && hasResult(m)).map(m => [key(m.a, m.b), m]));
+  const kept = new Set();
+  const matches = [];
+  groups.forEach((g, gi) => {
+    const label = E.GROUP_LABELS[gi];
+    E.roundRobin(g).forEach(([a, b], i) => {
+      const prev = played.get(key(a, b));
+      if (prev) kept.add(key(a, b));
+      matches.push(prev ? { ...prev, id: `${label}${i + 1}`, stage: label } : { id: `${label}${i + 1}`, stage: label, a, b });
+    });
+  });
+  const ko = night.matches.filter(m => !E.isGroupStage(m.stage));
+  const same = JSON.stringify(groups.map(g => [...g].sort())) === JSON.stringify(night.groups.map(g => [...g].sort()));
+  return { same, matches, dropped: played.size - kept.size, koResults: ko.filter(hasResult).length, koCount: ko.length };
+}
+
+function editForm(night) {
+  const e = app.edit;
+  const two = e.groups.length === 2;
+  const plan = planRebuild(night, e.groups);
+  let impact;
+  if (plan.same) impact = 'Groups unchanged.';
+  else {
+    impact = `${plural(plan.matches.length, 'group match', 'group matches')} after saving.`;
+    if (plan.dropped) impact += ` <b>${plural(plan.dropped, 'result')} will be removed</b> (players no longer in the same group).`;
+    if (plan.koCount) impact += ` The knockout will be reset${plan.koResults ? ` and its ${plural(plan.koResults, 'result')} removed` : ''}.`;
+  }
+  const groupRows = two
+    ? [...e.picked].sort(byName).map(id => {
+      const g = e.groups[0].includes(id) ? 0 : 1;
+      return `<div class="grp-row"><span>${esc(nameOf(id))}</span><span class="seg small">
+        <button class="${g === 0 ? 'on' : ''}" data-act="editMove" data-id="${esc(id)}" data-g="0">A</button>
+        <button class="${g === 1 ? 'on' : ''}" data-act="editMove" data-id="${esc(id)}" data-g="1">B</button></span></div>`;
+    }).join('')
+    : '';
+  return `<section class="page-head"><h1>Edit tournament</h1><p class="sub">Nothing changes until you tap Save.</p></section>
+    <section class="card"><label class="field">Date <input type="date" id="editDate" value="${esc(e.date)}"></label></section>
+    <section class="card"><h2>Players <small>${plural(e.picked.size, 'playing', 'playing')}</small></h2>${playerChecklist(e.picked, 'data-edit-pick')}
+      <form class="row add-row" data-form="editAddPlayer"><input name="name" placeholder="New player's name" autocomplete="off" required><button>Add</button></form></section>
+    <section class="card"><h2>Groups <small>${two ? `A: ${e.groups[0].length} · B: ${e.groups[1].length}` : `${e.groups[0].length} players`}</small></h2>
+      <div class="seg wide-seg"><button class="${two ? 'on' : ''}" data-act="editFormat" data-n="2">Two groups</button><button class="${two ? '' : 'on'}" data-act="editFormat" data-n="1">One group</button></div>
+      ${two ? `<div class="grp-list">${groupRows}</div>` : '<p class="muted">Everyone plays everyone. With 4 or more players the top 4 go to the semis (1v4, 2v3).</p>'}
+      <button class="small redraw" data-act="editRedraw">Redraw groups from the table</button></section>
+    <p class="notice">${impact}</p>
+    <div class="btn-pair"><button data-act="editCancel">Cancel</button><button class="primary" data-act="editSave">Save changes</button></div>
+    <section class="card"><h2>Delete tournament</h2><p class="muted">Removes this tournament and all its results.</p>
+      <button class="danger wide" data-act="deleteNight" data-night="${esc(night.id)}">Delete tournament</button></section>`;
+}
+
+function editTogglePlayer(id, on) {
+  const e = app.edit;
+  if (on) {
+    e.picked.add(id);
+    const sizes = e.groups.map(g => g.length);
+    e.groups[sizes.indexOf(Math.min(...sizes))].push(id);
+  } else {
+    e.picked.delete(id);
+    e.groups = e.groups.map(g => g.filter(x => x !== id));
+  }
 }
 
 function viewSettings() {
@@ -550,7 +652,7 @@ function viewSettings() {
       </div></section>`;
     const players = [...app.data.players].sort((a, b) => a.name.localeCompare(b.name));
     h += `<section class="card"><h2>Players</h2><ul class="plain">${players.map(x => `<li class="between">${who(x.id)}
-      <span class="row" style="flex-wrap:nowrap"><button class="small" data-act="rename" data-id="${esc(x.id)}">Rename</button>${playerUsed(x.id) ? '' : `<button class="small danger" data-act="deletePlayer" data-id="${esc(x.id)}">Delete</button>`}</span></li>`).join('') || '<li class="muted">None yet.</li>'}</ul></section>`;
+      <span class="row nowrap-row"><button class="small" data-act="rename" data-id="${esc(x.id)}">Rename</button>${playerUsed(x.id) ? '' : `<button class="small danger" data-act="deletePlayer" data-id="${esc(x.id)}">Delete</button>`}</span></li>`).join('') || '<li class="muted">None yet.</li>'}</ul></section>`;
   } else {
     h += `<section class="card"><h2>Recorder sign-in</h2>
       <p class="muted" style="margin-bottom:12px">Only the person recording results needs this. Viewing the ranking needs nothing.</p>
@@ -583,8 +685,8 @@ const notFound = () => '<p class="empty">Not found. <a href="#/">Back to the tab
 const routes = [
   [/^#?\/?$/, viewTable, 'table'],
   [/^#\/player\/(.+)$/, viewPlayer, 'table'],
-  [/^#\/(fridays|nights)$/, () => viewFridays(), 'fridays'],
-  [/^#\/night\/(.+)$/, viewNight, 'fridays'],
+  [/^#\/(?:tournaments|fridays|nights)$/, () => viewTournaments(), 'tournaments'],
+  [/^#\/(?:tournament|night)\/(.+)$/, viewNight, 'tournaments'],
   [/^#\/stats$/, viewStats, 'stats'],
   [/^#\/record$/, viewRecord, 'record'],
   [/^#\/rules$/, viewRules, 'rules'],
@@ -630,39 +732,37 @@ function renderSync() {
 }
 
 // ---------- score entry ----------
+// A compact box pinned to the top of the screen, so it stays above the phone keyboard.
 
 function openScore(nightId, matchId) {
   const night = findNight(nightId);
   const m = night.matches.find(x => x.id === matchId);
   const g = i => m.games?.[i] ?? ['', ''];
+  const info = app.calc.nightInfo.get(nightId);
   dialog.dataset.night = nightId;
   dialog.dataset.match = matchId;
   dialog.innerHTML = `<form method="dialog" class="sheet" autocomplete="off">
-    <div class="grabber"></div>
-    <h2>${stageName(night, m)}</h2>
+    <div class="sheet-bar"><button class="primary small" data-act="saveScore">Save</button><b>${stageName(night, m)}</b><button class="small plain-btn" value="cancel" formnovalidate>Cancel</button></div>
     <div class="score-grid">
-      <span></span>
-      <span class="head">${avatar(m.a, 36)}<b>${esc(nameOf(m.a))}</b></span>
-      <span class="head">${avatar(m.b, 36)}<b>${esc(nameOf(m.b))}</b></span>
-      ${[0, 1, 2].map(i => `<span>Game ${i + 1}</span>
+      <span></span><b>${esc(nameOf(m.a))}${startRating(info, m.a)}</b><b>${esc(nameOf(m.b))}${startRating(info, m.b)}</b>
+      ${[0, 1, 2].map(i => `<span>G${i + 1}</span>
         <input data-g="${i}" data-s="0" type="number" inputmode="numeric" min="0" max="99" value="${g(i)[0]}" aria-label="Game ${i + 1} ${esc(nameOf(m.a))}">
         <input data-g="${i}" data-s="1" type="number" inputmode="numeric" min="0" max="99" value="${g(i)[1]}" aria-label="Game ${i + 1} ${esc(nameOf(m.b))}">`).join('')}
     </div>
     <p class="preview" id="scorePreview"></p>
-    <div class="sheet-actions"><button class="primary" data-act="saveScore">Save</button><button value="cancel" formnovalidate>Cancel</button></div>
     <details><summary>Walkover, unfinished or clear</summary>
-      <p class="muted" style="margin-top:8px">Walkovers and unfinished matches don't change ratings. A walkover counts as a win in the group table.</p>
       <div class="row">
-        <button class="small" data-act="walkover" data-id="${esc(m.a)}">Walkover to ${esc(nameOf(m.a))}</button>
-        <button class="small" data-act="walkover" data-id="${esc(m.b)}">Walkover to ${esc(nameOf(m.b))}</button>
+        <button class="small" data-act="walkover" data-id="${esc(m.a)}">W/O to ${esc(nameOf(m.a))}</button>
+        <button class="small" data-act="walkover" data-id="${esc(m.b)}">W/O to ${esc(nameOf(m.b))}</button>
         <button class="small" data-act="unfinished">Unfinished</button>
-        <button class="small danger" data-act="clearScore">Clear result</button>
+        <button class="small danger" data-act="clearScore">Clear</button>
       </div>
+      <p class="muted tiny">Walkovers and unfinished matches don't change ratings. A walkover counts as a win in the group table.</p>
     </details>
   </form>`;
   dialog.showModal();
   scorePreview();
-  if (!m.games) dialog.querySelector('input').focus();
+  if (!m.games) dialog.querySelector('input').focus({ preventScroll: true });
 }
 
 function readGames() {
@@ -689,7 +789,7 @@ function scorePreview(showError = false) {
   const { night, m } = dialogMatch();
   if (error) {
     out.className = showError ? 'preview warn' : 'preview muted';
-    out.textContent = showError || games?.length >= 2 ? error : 'Enter each game, left player\'s score on the left.';
+    out.textContent = showError || games?.length >= 2 ? error : 'Each game: left player\'s points on the left.';
     return;
   }
   const o = E.outcome({ ...m, games });
@@ -698,8 +798,7 @@ function scorePreview(showError = false) {
   const w = E.weightFor(o.gamesLost, share);
   const base = w * (1 - E.expected(info.start.get(o.winner), info.start.get(o.loser)));
   out.className = 'preview';
-  out.innerHTML = `<b>${esc(nameOf(o.winner))} wins ${o.gamesWon}-${o.gamesLost}</b> · points ${o.pointsWon}–${o.pointsLost} (${(share * 100).toFixed(1)}%) · weight ${w.toFixed(2)}<br>
-    ${esc(nameOf(o.winner))} ${chg(info.k.get(o.winner) * base)} &nbsp; ${esc(nameOf(o.loser))} ${chg(-info.k.get(o.loser) * base)}`;
+  out.innerHTML = `<b>${esc(nameOf(o.winner))} wins ${o.gamesWon}-${o.gamesLost}</b> · ${esc(nameOf(o.winner))} ${chg(info.k.get(o.winner) * base)} ${esc(nameOf(o.loser))} ${chg(-info.k.get(o.loser) * base)}`;
 }
 
 function setResult(describe, apply) {
@@ -727,9 +826,8 @@ function addPlayer(name) {
   return id;
 }
 
-function addMatches(night, label, pairs) {
-  let n = Math.max(0, ...groupMatches(night, label).map(m => parseInt(m.id.slice(label.length), 10) || 0));
-  for (const [a, b] of pairs) night.matches.push({ id: `${label}${++n}`, stage: label, a, b });
+function fixtures(groups) {
+  return groups.flatMap((g, gi) => E.roundRobin(g).map(([a, b], i) => ({ id: `${E.GROUP_LABELS[gi]}${i + 1}`, stage: E.GROUP_LABELS[gi], a, b })));
 }
 
 const actions = {
@@ -749,22 +847,20 @@ const actions = {
     const date = document.getElementById('nightDate').value;
     const ids = [...app.draft.picked];
     if (!date) return alert('Pick the date.');
-    if (app.data.nights.some(n => n.date === date)) return alert(`There's already a night on ${fmtDate(date)}.`);
+    if (app.data.nights.some(n => n.date === date)) return alert(`There's already a tournament on ${fmtDate(date)}.`);
     if (ids.length < 2) return alert('Tick at least 2 players.');
-    if ((ids.length < 8 || ids.length > 20) && !confirm(`The rules are written for 8–20 players. Start with ${ids.length} anyway?`)) return;
-    const groups = E.seedGroups(ids, app.calc.ratingOf, nameOf);
-    const night = { id: date, date, closed: false, attendees: ids, groups, matches: [] };
-    groups.forEach((g, i) => addMatches(night, E.GROUP_LABELS[i], E.roundRobin(g)));
+    const groups = drawGroups(ids);
+    const night = { id: date, date, closed: false, attendees: ids, groups, matches: fixtures(groups) };
     app.draft = null;
-    update(`Start night ${date} (${ids.length} players)`, d => d.nights.push(night));
+    update(`Start tournament ${date} (${ids.length} players)`, d => d.nights.push(night));
   },
 
   makeSemis: () => {
     const night = openNight();
     const pending = night.matches.filter(m => E.isGroupStage(m.stage) && !E.isSettled(m)).length;
-    if (pending && !confirm(`${plural(pending, 'group match')} still have no result. Make the semis from the tables as they are now?`)) return;
+    if (pending && !confirm(`${plural(pending, 'group match', 'group matches')} still ${pending === 1 ? 'has' : 'have'} no result. Make the semis from the tables as they are now?`)) return;
     const pairs = E.semiPairs(groupTables(night));
-    if (!pairs) return alert('Not enough players in the groups for semi-finals.');
+    if (!pairs) return alert('Each group needs at least 2 players for semi-finals.');
     update(`${night.date}: semi-finals made`, () => {
       pairs.forEach(([a, b], i) => night.matches.push({ id: `SF${i + 1}`, stage: 'SF', a, b }));
     }, { throttle: true });
@@ -776,7 +872,7 @@ const actions = {
   makeFinal: () => {
     const night = openNight();
     const semis = night.matches.filter(m => m.stage === 'SF');
-    const [a, b] = semis.length ? semis.map(m => E.outcome(m).winner) : groupTables(night)[0].map(r => r.id);
+    const [a, b] = semis.length ? semis.map(m => E.outcome(m).winner) : groupTables(night).flat().slice(0, 2).map(r => r.id);
     update(`${night.date}: final made`, () => night.matches.push({ id: 'F', stage: 'F', a, b }), { throttle: true });
   },
   redoFinal: () => {
@@ -787,24 +883,76 @@ const actions = {
   closeNight: () => {
     const night = openNight();
     const pending = night.matches.filter(m => !E.isSettled(m)).length;
-    const msg = `Close ${fmtDate(night.date)} and update everyone's ratings?` +
-      (pending ? `\n\n${plural(pending, 'match')} have no result and won't count.` : '') +
-      (night.matches.some(m => m.stage === 'F') ? '' : '\n\nThere is no final, so nobody gets the unbeaten bonus.');
+    const msg = `Finish the ${fmtDate(night.date)} tournament and update everyone's ratings?` +
+      (pending ? `\n\n${plural(pending, 'match', 'matches')} with no result won't count.` : '') +
+      (night.matches.some(m => m.stage === 'F') ? '' : '\n\nThere is no final, so no knockout bonuses.');
     if (!confirm(msg)) return;
-    update(`Close night ${night.date}`, () => { night.closed = true; });
+    update(`Finish tournament ${night.date}`, () => { night.closed = true; });
     location.hash = nightHref(night.id);
   },
   reopenNight: el => {
-    if (openNight()) return alert('Another night is still open. Close it first.');
+    if (openNight()) return alert('Another tournament is still in progress. Finish or delete it first.');
     const night = findNight(el.dataset.night);
-    if (!confirm(`Reopen ${fmtDate(night.date)}? Its rating changes are taken back until you close it again.`)) return;
-    update(`Reopen night ${night.date}`, () => { night.closed = false; });
+    if (!confirm(`Reopen the ${fmtDate(night.date)} tournament? Its rating changes are taken back until you finish it again.`)) return;
+    update(`Reopen tournament ${night.date}`, () => { night.closed = false; });
     location.hash = '#/record';
   },
   deleteNight: el => {
     const night = findNight(el.dataset.night);
-    if (!confirm(`Delete ${fmtDate(night.date)} and all its results? This can't be undone here (GitHub keeps the old version).`)) return;
-    update(`Delete night ${night.date}`, d => { d.nights = d.nights.filter(n => n !== night); });
+    if (!confirm(`Delete the ${fmtDate(night.date)} tournament and all its results? This can't be undone here (GitHub keeps the old version).`)) return;
+    app.edit = null;
+    update(`Delete tournament ${night.date}`, d => { d.nights = d.nights.filter(n => n !== night); });
+    location.hash = night.closed ? '#/tournaments' : '#/record';
+  },
+
+  editStart: () => { startEdit(openNight()); render(); window.scrollTo(0, 0); },
+  editCancel: () => { app.edit = null; render(); window.scrollTo(0, 0); },
+  editMove: el => {
+    const e = app.edit, id = el.dataset.id, g = +el.dataset.g;
+    e.groups = e.groups.map(x => x.filter(y => y !== id));
+    e.groups[g].push(id);
+    render();
+  },
+  editFormat: el => {
+    const e = app.edit;
+    const ids = [...e.picked];
+    const score = rankScore();
+    if (+el.dataset.n === 1) e.groups = [ids.sort((a, b) => score(b) - score(a))];
+    else if (ids.length < 4) return alert('Two groups need at least 4 players.');
+    else e.groups = drawGroups(ids);
+    render();
+  },
+  editRedraw: () => {
+    const e = app.edit;
+    const score = rankScore();
+    e.groups = e.groups.length === 2 && e.picked.size >= 4
+      ? drawGroups([...e.picked])
+      : [[...e.picked].sort((a, b) => score(b) - score(a))];
+    render();
+  },
+  editSave: () => {
+    const e = app.edit;
+    const night = findNight(e.nightId);
+    if (!e.date) return alert('Pick the date.');
+    if (app.data.nights.some(n => n !== night && n.date === e.date)) return alert(`There's already a tournament on ${fmtDate(e.date)}.`);
+    if (e.picked.size < 2) return alert('A tournament needs at least 2 players.');
+    if (e.groups.length === 2 && e.groups.some(g => g.length < 2)) return alert('Each group needs at least 2 players.');
+    const plan = planRebuild(night, e.groups);
+    const losses = [plan.dropped ? plural(plan.dropped, 'group result') : '', !plan.same && plan.koResults ? plural(plan.koResults, 'knockout result') : ''].filter(Boolean);
+    if (losses.length && !confirm(`Saving removes ${losses.join(' and ')}. Continue?`)) return;
+    const added = [...e.picked].filter(id => !night.attendees.includes(id)).length;
+    const removed = night.attendees.filter(id => !e.picked.has(id)).length;
+    update(`Edit tournament ${e.date}${added ? ` +${added}` : ''}${removed ? ` −${removed}` : ''}${plan.same ? '' : ', groups changed'}`, () => {
+      night.date = e.date;
+      night.attendees = [...e.picked];
+      if (!plan.same) {
+        night.groups = e.groups.map(g => [...g]);
+        night.matches = plan.matches;
+      }
+    });
+    app.edit = null;
+    render();
+    window.scrollTo(0, 0);
   },
 
   syncNow: () => {
@@ -853,33 +1001,11 @@ const forms = {
     app.draft.picked.add(id);
     update(`Add player ${nameOf(id)}`, () => {}, { throttle: true });
   },
-  lateArrival: form => {
-    const night = openNight();
-    let id = form.id.value;
-    if (!id && form.name.value.trim()) id = addPlayer(form.name.value);
+  editAddPlayer: form => {
+    const id = addPlayer(form.name.value);
     if (!id) return;
-    const sizes = night.groups.map(g => g.length);
-    const gi = sizes.indexOf(Math.min(...sizes));
-    const label = E.GROUP_LABELS[gi];
-    update(`${night.date}: ${nameOf(id)} joins ${groupName(night, label)}`, () => {
-      addMatches(night, label, night.groups[gi].map(other => [other, id]));
-      night.groups[gi].push(id);
-      night.attendees.push(id);
-    }, { throttle: true });
-  },
-  removePlayer: form => {
-    const night = openNight();
-    const id = form.id.value;
-    if (night.matches.some(m => (m.a === id || m.b === id) && (m.games || m.walkover || m.unfinished))) {
-      return alert(`${nameOf(id)} already has results tonight. Mark their other matches as unfinished instead.`);
-    }
-    if (night.matches.some(m => !E.isGroupStage(m.stage))) return alert('Redo the knockout matches first.');
-    if (!confirm(`Remove ${nameOf(id)} from tonight?`)) return;
-    update(`${night.date}: ${nameOf(id)} removed`, () => {
-      night.attendees = night.attendees.filter(x => x !== id);
-      night.groups = night.groups.map(g => g.filter(x => x !== id));
-      night.matches = night.matches.filter(m => m.a !== id && m.b !== id);
-    }, { throttle: true });
+    editTogglePlayer(id, true);
+    update(`Add player ${nameOf(id)}`, () => {}, { throttle: true });
   },
   signIn: async form => {
     const cfg = {
@@ -922,19 +1048,29 @@ document.addEventListener('input', e => {
     document.getElementById('calcOut').innerHTML = calcWorking(new FormData(document.getElementById('calc')));
   }
   if (e.target.id === 'nightDate') app.draft.date = e.target.value;
+  if (e.target.id === 'editDate') app.edit.date = e.target.value;
 });
 
 document.addEventListener('change', e => {
-  const id = e.target.dataset?.pick;
-  if (id === undefined) return;
-  e.target.checked ? app.draft.picked.add(id) : app.draft.picked.delete(id);
-  document.getElementById('plan').innerHTML = planText();
+  const t = e.target;
+  if (t.dataset?.pick !== undefined) {
+    t.checked ? app.draft.picked.add(t.dataset.pick) : app.draft.picked.delete(t.dataset.pick);
+    document.getElementById('plan').innerHTML = planText(app.draft.picked.size);
+  }
+  if (t.dataset?.editPick !== undefined) {
+    editTogglePlayer(t.dataset.editPick, t.checked);
+    render();
+  }
 });
 
-// Tapping the dimmed area above the score sheet closes it.
+// Tapping the dimmed area around the score box closes it.
 dialog.addEventListener('click', e => { if (e.target === dialog) dialog.close(); });
 
-window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => {
+  if (location.hash !== '#/record') app.edit = null;
+  render();
+  window.scrollTo(0, 0);
+});
 
 // ---------- start-up ----------
 

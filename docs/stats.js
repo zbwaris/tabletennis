@@ -1,12 +1,12 @@
-// Season statistics for player pages and the Stats tab. Built from closed Fridays only and
-// from rated matches only (walkovers and unfinished matches are left out).
+// Season statistics for player pages and the Stats tab. Built from finished tournaments only
+// and from rated matches only (walkovers and unfinished matches are left out).
 
 export function buildStats(calc) {
   const players = new Map();
   const get = id => {
     if (!players.has(id)) {
       players.set(id, {
-        id, played: 0, won: 0, lost: 0, twoNil: 0, pf: 0, pa: 0, shareSum: 0, nights: 0, unbeaten: 0,
+        id, played: 0, won: 0, lost: 0, twoNil: 0, pf: 0, pa: 0, shareSum: 0, nights: 0, titles: 0, finals: 0,
         streak: 0, bestStreak: 0, results: [], h2h: new Map(),
       });
     }
@@ -21,7 +21,11 @@ export function buildStats(calc) {
       get(id).nights++;
       nightGains.push({ id, night, change: info.change.get(id) });
     }
-    if (info.unbeaten) get(info.unbeaten).unbeaten++;
+    if (info.champion) {
+      get(info.champion).titles++;
+      get(info.champion).finals++;
+      get(info.runnerUp).finals++;
+    }
     for (const m of night.matches) {
       const d = info.details.get(m.id);
       if (!d) continue;

@@ -8,7 +8,10 @@ export const K_NEW = 48;
 export const NEW_PLAYER_NIGHTS = 4;
 export const BONUS_WINDOW = 8;
 export const ATTEND_BONUS = 5;
-export const UNBEATEN_BONUS = 10;
+// Placement bonus: reaching the knockout. Kept out of the rating so Elo stays zero-sum.
+export const SEMI_BONUS = 10;
+export const FINAL_BONUS = 15;
+export const WIN_BONUS = 20;
 
 export const GROUP_LABELS = ['A', 'B', 'C', 'D'];
 export const isGroupStage = stage => stage !== 'SF' && stage !== 'F';
@@ -77,7 +80,7 @@ export function outcome(m) {
 
 export const isSettled = m => !!m.unfinished || outcome(m) !== null;
 
-// Rating changes for one night, all scored from the ratings players arrived with.
+// Rating changes for one tournament, all scored from the ratings players arrived with.
 function settleNight(night, ratingOf, kOf) {
   const attendees = new Set(night.attendees);
   for (const m of night.matches) { attendees.add(m.a); attendees.add(m.b); }
@@ -85,13 +88,10 @@ function settleNight(night, ratingOf, kOf) {
   const k = new Map([...attendees].map(id => [id, kOf(id)]));
   const change = new Map([...attendees].map(id => [id, 0]));
   const details = new Map();
-  const lost = new Set();
 
   for (const m of night.matches) {
     const o = outcome(m);
-    if (!o) continue;
-    lost.add(o.loser);
-    if (!o.rated) continue;
+    if (!o || !o.rated) continue;
     const share = o.pointsWon / (o.pointsWon + o.pointsLost);
     const weight = weightFor(o.gamesLost, share);
     const exp = expected(start.get(o.winner), start.get(o.loser));
@@ -102,10 +102,18 @@ function settleNight(night, ratingOf, kOf) {
     details.set(m.id, { ...o, share, weight, expected: exp, gain, loss });
   }
 
+  // Placement: playing in a semi or the final counts as reaching it, even if it wasn't finished.
+  const placing = new Map();
+  const reach = (id, bonus) => placing.set(id, Math.max(placing.get(id) ?? 0, bonus));
+  for (const m of night.matches) {
+    if (m.stage === 'SF') { reach(m.a, SEMI_BONUS); reach(m.b, SEMI_BONUS); }
+    if (m.stage === 'F') { reach(m.a, FINAL_BONUS); reach(m.b, FINAL_BONUS); }
+  }
   const final = night.matches.find(m => m.stage === 'F');
   const champion = final ? outcome(final)?.winner ?? null : null;
-  const unbeaten = champion && !lost.has(champion) ? champion : null;
-  return { attendees, start, k, change, details, champion, unbeaten };
+  if (champion) reach(champion, WIN_BONUS);
+  const runnerUp = champion ? (champion === final.a ? final.b : final.a) : null;
+  return { attendees, start, k, change, details, champion, runnerUp, placing };
 }
 
 export function compute(data) {
@@ -132,23 +140,23 @@ export function compute(data) {
     closed.push(night);
   }
 
-  // Bonuses over the last 8 Fridays. Fridays before a player's first night aren't missed.
+  // Bonuses over the last 8 tournaments. Tournaments before a player's first one aren't missed.
   const windowStart = Math.max(0, closed.length - BONUS_WINDOW);
   const latest = closed.at(-1);
   const table = [], inactive = [];
   for (const p of data.players) {
     if (!first.has(p.id)) continue;
-    let attended = 0, missed = 0, unbeaten = 0;
+    let attended = 0, missed = 0, knockout = 0;
     for (let i = Math.max(windowStart, first.get(p.id)); i < closed.length; i++) {
       const info = nightInfo.get(closed[i].id);
       info.attendees.has(p.id) ? attended++ : missed++;
-      if (info.unbeaten === p.id) unbeaten++;
+      knockout += info.placing.get(p.id) ?? 0;
     }
-    const bonus = ATTEND_BONUS * (attended - missed) + UNBEATEN_BONUS * unbeaten;
+    const bonus = ATTEND_BONUS * (attended - missed) + knockout;
     const lastInfo = latest && nightInfo.get(latest.id);
     const row = {
       id: p.id, name: p.name, rating: ratingOf(p.id), nights: nightsOf(p.id),
-      attended, missed, unbeaten, bonus, ladder: ratingOf(p.id) + bonus,
+      attended, missed, knockout, bonus, ladder: ratingOf(p.id) + bonus,
       lastChange: lastInfo?.attendees.has(p.id) ? lastInfo.change.get(p.id) : null,
     };
     (attended ? table : inactive).push(row);
@@ -192,10 +200,11 @@ export function standings(ids, matches) {
   return order(ids).map((id, i) => ({ ...s.get(id), pos: i + 1, gd: gd(id), pd: pd(id) }));
 }
 
-// Snake seeding by rating: ranked 1-8 -> A gets 1, 4, 5, 8; B gets 2, 3, 6, 7.
-export function seedGroups(ids, ratingOf, nameOf) {
-  const ranked = [...ids].sort((a, b) => ratingOf(b) - ratingOf(a) || nameOf(a).localeCompare(nameOf(b)));
-  if (ranked.length <= 10) return [ranked];
+// Two groups from 4 players up, snake-seeded by ranking so both are equally strong:
+// ranked 1-8 -> A gets 1, 4, 5, 8; B gets 2, 3, 6, 7.
+export function seedGroups(ids, scoreOf, nameOf) {
+  const ranked = [...ids].sort((a, b) => scoreOf(b) - scoreOf(a) || nameOf(a).localeCompare(nameOf(b)));
+  if (ranked.length < 4) return [ranked];
   const A = [], B = [];
   ranked.forEach((id, i) => ((Math.floor(i / 2) % 2 === 0) === (i % 2 === 0) ? A : B).push(id));
   return [A, B];
@@ -216,7 +225,7 @@ export function roundRobin(ids) {
   return pairs;
 }
 
-// One group: 1v4 and 2v3. Two groups: A1 v B2 and B1 v A2.
+// Two groups: A1 v B2 and B1 v A2. (One group, kept for older tournaments: 1v4 and 2v3.)
 export function semiPairs(groupTables) {
   if (groupTables.length === 1) {
     const t = groupTables[0];
