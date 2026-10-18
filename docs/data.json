@@ -14,7 +14,7 @@
   {
    "id": "2026-10-18",
    "date": "2026-10-18",
-   "closed": false,
+   "closed": true,
    "attendees": [
     "p3wi9t0",
     "pkrk2v3"
@@ -31,6 +31,26 @@
      "stage": "A",
      "a": "pkrk2v3",
      "b": "p3wi9t0"
+    },
+    {
+     "id": "F",
+     "stage": "F",
+     "a": "pkrk2v3",
+     "b": "p3wi9t0",
+     "games": [
+      [
+       11,
+       2
+      ],
+      [
+       3,
+       11
+      ],
+      [
+       11,
+       5
+      ]
+     ]
     }
    ]
   }
