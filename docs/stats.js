@@ -17,15 +17,14 @@ export function buildStats(calc) {
 
   for (const night of calc.closed) {
     const info = calc.nightInfo.get(night.id);
+    const member = id => id && !calc.isGuest(id);   // guests aren't ranked or in the stats
     for (const id of info.attendees) {
+      if (!member(id)) continue;
       get(id).nights++;
       nightGains.push({ id, night, change: info.change.get(id) });
     }
-    if (info.champion) {
-      get(info.champion).titles++;
-      get(info.champion).finals++;
-      get(info.runnerUp).finals++;
-    }
+    if (member(info.champion)) { get(info.champion).titles++; get(info.champion).finals++; }
+    if (member(info.runnerUp)) get(info.runnerUp).finals++;
     for (const m of night.matches) {
       const d = info.details.get(m.id);
       if (!d) continue;

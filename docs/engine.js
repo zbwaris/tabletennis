@@ -7,12 +7,13 @@ export const K_NORMAL = 16;
 export const K_NEW = 48;
 export const NEW_PLAYER_NIGHTS = 4;
 export const BONUS_WINDOW = 8;
-// The table's only bonus: attendance, zero-sum and deliberately strong because participation
-// is what the club wants to reward. At each tournament, everyone on the table who doesn't come
-// pays ABSENCE_COST, shared equally among those who came. On a typical night (about 3 of 14
-// away) skipping costs about 40 against attending, roughly two bad nights. Kept out of the
-// rating so every match is still scored fairly.
-export const ABSENCE_COST = 30;
+// Absence debt: participation is what the club rewards. Each missed tournament (since a
+// player's first) adds MISS_COST to their debt, up to DEBT_CAP (8 misses); each tournament they
+// attend pays back REPAYMENT. Table score = rating − debt, so a regular's score is just their
+// rating. Kept out of the rating so every match is still scored fairly.
+export const MISS_COST = 30;
+export const REPAYMENT = 30;
+export const DEBT_CAP = 240;
 
 export const GROUP_LABELS = ['A', 'B', 'C', 'D'];
 // Knockout stages: semi-finals (SF), 3rd place match (3P, the two semi losers) and final (F).
@@ -84,7 +85,8 @@ export function outcome(m) {
 export const isSettled = m => !!m.unfinished || outcome(m) !== null;
 
 // Rating changes for one tournament, all scored from the ratings players arrived with.
-function settleNight(night, ratingOf, kOf) {
+// Matches involving a guest are played and shown, but never rated.
+function settleNight(night, ratingOf, kOf, isGuest) {
   const attendees = new Set(night.attendees);
   for (const m of night.matches) { attendees.add(m.a); attendees.add(m.b); }
   const start = new Map([...attendees].map(id => [id, ratingOf(id)]));
@@ -94,7 +96,7 @@ function settleNight(night, ratingOf, kOf) {
 
   for (const m of night.matches) {
     const o = outcome(m);
-    if (!o || !o.rated) continue;
+    if (!o || !o.rated || isGuest(o.winner) || isGuest(o.loser)) continue;
     const share = o.pointsWon / (o.pointsWon + o.pointsLost);
     const weight = weightFor(o.gamesLost, share);
     const exp = expected(start.get(o.winner), start.get(o.loser));
@@ -122,12 +124,15 @@ export function compute(data) {
   const ratingOf = id => rating.get(id) ?? START_RATING;
   const nightsOf = id => played.get(id) ?? 0;
   const kOf = id => (nightsOf(id) < NEW_PLAYER_NIGHTS ? K_NEW : K_NORMAL);
+  const guests = new Set(data.players.filter(p => p.guest).map(p => p.id));
+  const isGuest = id => guests.has(id);
 
   for (const night of nights) {
-    const info = settleNight(night, ratingOf, kOf);
+    const info = settleNight(night, ratingOf, kOf, isGuest);
     nightInfo.set(night.id, info);
     if (!night.closed) continue; // an open night shows provisional changes only
     for (const id of info.attendees) {
+      if (isGuest(id)) continue;
       const r = ratingOf(id) + info.change.get(id);
       rating.set(id, r);
       played.set(id, nightsOf(id) + 1);
@@ -138,39 +143,31 @@ export function compute(data) {
     closed.push(night);
   }
 
-  // Attendance bonus per tournament. Who pays: anyone who came to at least one of the 8
-  // tournaments up to this one but not this one. Their payments are shared by the attendees.
+  // Absence debt, tournament by tournament since each player's first one.
   const came = closed.map(n => nightInfo.get(n.id).attendees);
-  const settle = came.map((att, i) => {
-    const roster = new Set(came.slice(Math.max(0, i - BONUS_WINDOW + 1), i + 1).flatMap(s => [...s]));
-    const absent = new Set([...roster].filter(id => !att.has(id)));
-    return { absent, share: att.size ? (ABSENCE_COST * absent.size) / att.size : 0 };
-  });
-
-  // Each player's bonus: the sum over the last 8 tournaments.
-  const windowStart = Math.max(0, closed.length - BONUS_WINDOW);
   const latest = closed.at(-1);
   const table = [], inactive = [];
   for (const p of data.players) {
-    if (!first.has(p.id)) continue;
-    let attended = 0, missed = 0, earned = 0, paid = 0;
-    for (let i = Math.max(windowStart, first.get(p.id)); i < closed.length; i++) {
-      if (came[i].has(p.id)) { attended++; earned += settle[i].share; }
-      else if (settle[i].absent.has(p.id)) { missed++; paid += ABSENCE_COST; }
+    if (!first.has(p.id) || isGuest(p.id)) continue;
+    let debt = 0, streak = 0;
+    for (let i = first.get(p.id); i < closed.length; i++) {
+      if (came[i].has(p.id)) { debt = Math.max(0, debt - REPAYMENT); streak = 0; }
+      else { debt = Math.min(DEBT_CAP, debt + MISS_COST); streak++; }
     }
-    const bonus = earned - paid;
+    // On the table: came to at least one of the last 8 tournaments.
+    const active = came.slice(-BONUS_WINDOW).some(s => s.has(p.id));
     const lastInfo = latest && nightInfo.get(latest.id);
     const row = {
       id: p.id, name: p.name, rating: ratingOf(p.id), nights: nightsOf(p.id),
-      attended, missed, earned, paid, bonus, ladder: ratingOf(p.id) + bonus,
+      debt, missedInRow: streak, bonus: -debt, ladder: ratingOf(p.id) - debt,
       lastChange: lastInfo?.attendees.has(p.id) ? lastInfo.change.get(p.id) : null,
     };
-    (attended ? table : inactive).push(row);
+    (active ? table : inactive).push(row);
   }
   table.sort((x, y) => y.ladder - x.ladder || y.rating - x.rating || x.name.localeCompare(y.name));
   inactive.sort((x, y) => y.rating - x.rating);
 
-  return { nights, closed, nightInfo, table, inactive, history, ratingOf, nightsOf, kOf };
+  return { nights, closed, nightInfo, table, inactive, history, ratingOf, nightsOf, kOf, isGuest };
 }
 
 // Group placings: matches won, then head-to-head, then game difference, then points difference.

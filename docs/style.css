@@ -378,6 +378,10 @@ dialog::backdrop { background: rgba(15, 20, 25, 0.45); }
 .head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .head-row > div { min-width: 0; }
 .add-row { margin-top: 10px; }
+.add-row.stack { grid-template-columns: minmax(0, 1fr); }
+.add-row .row > input { flex-basis: 0; }
+.guest-check { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--ink-2); }
+.guest-check input { width: 18px; height: 18px; accent-color: var(--accent); padding: 0; flex: none; }
 .btn-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .seg { display: inline-flex; background: #eef0f2; border-radius: 10px; padding: 3px; gap: 2px; }
 .seg button { background: transparent; padding: 7px 14px; border-radius: 8px; color: var(--muted); }
