@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Friday Table Tennis</title>
+<meta name="description" content="Ranking and results for Friday table tennis">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%93%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/">Friday Table Tennis</a>
+  <button id="sync" class="sync" data-act="syncNow" hidden></button>
+</header>
+<nav class="tabs">
+  <a href="#/" data-nav>Ranking</a>
+  <a href="#/nights" data-nav>Nights</a>
+  <a href="#/record" data-nav="record" hidden>Record</a>
+  <a href="#/rules" data-nav>Rules</a>
+</nav>
+<main id="view"><p class="muted">Loading…</p></main>
+<footer><a href="#/settings">Recorder sign-in</a></footer>
+<dialog id="scoreDialog"></dialog>
+</body>
+</html>
