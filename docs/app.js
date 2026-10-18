@@ -32,7 +32,9 @@ const today = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 const groupName = (night, label) => (night.groups.length === 1 ? 'Group' : `Group ${label}`);
-const stageName = (night, m) => (m.stage === 'F' ? 'Final' : m.stage === 'SF' ? 'Semi-final' : groupName(night, m.stage));
+const stageName = (night, m) => ({ F: 'Final', SF: 'Semi-final', '3P': '3rd place match' }[m.stage] ?? groupName(night, m.stage));
+const knockout = night => night.matches.filter(m => !E.isGroupStage(m.stage))
+  .sort((x, y) => E.KNOCKOUT_ORDER[x.stage] - E.KNOCKOUT_ORDER[y.stage] || x.id.localeCompare(y.id));
 const openNight = () => app.data.nights.find(n => !n.closed);
 const findNight = id => app.data.nights.find(n => n.id === id);
 const groupMatches = (night, label) => night.matches.filter(m => m.stage === label);
@@ -104,13 +106,13 @@ function playOrder(night) {
 
 // "Match 7 · Group A": the number is the match's place in the playing order.
 function queueLabel(night, order, m) {
-  if (!E.isGroupStage(m.stage)) return m.stage === 'F' ? 'Final' : `Semi-final ${m.id.slice(2)}`;
+  if (!E.isGroupStage(m.stage)) return m.stage === 'SF' ? `Semi-final ${m.id.slice(2)}` : stageName(night, m);
   return `Match ${order.indexOf(m) + 1}${night.groups.length > 1 ? ` · ${groupName(night, m.stage)}` : ''}`;
 }
 
-function upNext(night, { editable = false, limit = Infinity, knockout = true } = {}) {
+function upNext(night, { editable = false, limit = Infinity, withKnockout = true } = {}) {
   const order = playOrder(night);
-  const ko = knockout ? night.matches.filter(m => !E.isGroupStage(m.stage)) : [];
+  const ko = withKnockout ? knockout(night) : [];
   const todo = [...order, ...ko].filter(m => !E.isSettled(m));
   if (!todo.length) return '';
   const shown = todo.slice(0, limit);
@@ -158,6 +160,7 @@ function groupTable(night, table) {
 function bracket(night) {
   const semis = night.matches.filter(m => m.stage === 'SF');
   const final = night.matches.find(m => m.stage === 'F');
+  const playoff = night.matches.find(m => m.stage === '3P');
   const box = (m, label) => {
     if (!m) return `<div class="bm"><div class="bm-label">${label}</div><div class="bm-row tbd"><b>To be decided</b></div><div class="bm-row tbd"><b>To be decided</b></div></div>`;
     const o = E.outcome(m);
@@ -170,7 +173,8 @@ function bracket(night) {
   return `<div class="bracket">
     <div class="br-col semis">${box(semis[0], 'Semi-final 1')}${box(semis[1], 'Semi-final 2')}</div>
     <div class="br-join"></div><div class="br-stem"></div>
-    <div class="br-col final">${box(final, `${trophy()} Final`)}</div></div>`;
+    <div class="br-col final">${box(final, `${trophy()} Final`)}</div>
+    ${playoff ? `<div class="br-third">${box(playoff, '3rd place')}</div>` : ''}</div>`;
 }
 
 function changesList(night) {
@@ -264,7 +268,7 @@ function viewNight(id) {
       : '<a class="button primary wide" href="#/record">Record results</a>';
   }
   if (!night.closed) h += upNext(night, { limit: 6 });
-  const ko = night.matches.filter(m => !E.isGroupStage(m.stage));
+  const ko = knockout(night);
   if (ko.length) {
     h += `<section class="card"><h2>Knockout</h2>${bracket(night)}
       <details class="more"><summary>Scores</summary><div class="matches">${ko.map(m => matchCard(night, m, { stage: true })).join('')}</div></details></section>`;
@@ -288,7 +292,7 @@ function tournamentHero(night, info) {
   if (info.champion) {
     champ = `<div class="champ">${trophy('trophy hero')}<small>Winner</small>
       <a href="${playerHref(info.champion)}"><b>${esc(nameOf(info.champion))}</b></a>
-      <span class="runner">Runner-up <a href="${playerHref(info.runnerUp)}">${esc(nameOf(info.runnerUp))}</a></span></div>`;
+      <span class="runner">Runner-up <a href="${playerHref(info.runnerUp)}">${esc(nameOf(info.runnerUp))}</a>${info.third ? ` · 3rd <a href="${playerHref(info.third)}">${esc(nameOf(info.third))}</a>` : ''}</span></div>`;
   } else if (night.closed) {
     champ = '<div class="champ"><small>No final recorded</small></div>';
   } else {
@@ -523,7 +527,7 @@ function desk(night) {
     <button data-act="editStart">Edit</button></section>
     <section class="card"><div class="between"><b>${p.done} of ${p.total} matches played</b><span class="tag live">Live</span></div>
     <div class="bar"><span style="width:${p.pct}%"></span></div></section>`;
-  h += upNext(night, { editable: true, knockout: false });
+  h += upNext(night, { editable: true, withKnockout: false });
   const order = playOrder(night);
   tables.forEach((t, i) => {
     const label = E.GROUP_LABELS[i];
@@ -543,6 +547,8 @@ function desk(night) {
     if (!same && semis.every(fresh) && !final) ko += '<p class="notice">Group results changed after the semis were made. Redo them to match the tables.</p>';
     ko += `<div class="matches">${semis.map((m, i) => `<div class="stage-label">Semi-final ${i + 1}</div>${matchCard(night, m, { editable: true })}`).join('')}</div>`;
   }
+  const playoff = night.matches.find(m => m.stage === '3P');
+  if (playoff) ko += `<div class="matches"><div class="stage-label">3rd place match</div>${matchCard(night, playoff, { editable: true })}</div>`;
   if (final) ko += `<div class="matches"><div class="stage-label">Final</div>${matchCard(night, final, { editable: true })}</div>`;
   const buttons = [];
   const canSemis = E.semiPairs(tables);
@@ -552,10 +558,10 @@ function desk(night) {
       : '<button class="primary" data-act="makeFinal">Make final</button>');
   }
   if (semis.length && !final) {
-    if (semis.every(m => E.outcome(m))) buttons.push('<button class="primary" data-act="makeFinal">Make final</button>');
+    if (semis.every(m => E.outcome(m))) buttons.push('<button class="primary" data-act="makeFinal">Make final and 3rd place match</button>');
     if (semis.every(fresh)) buttons.push('<button data-act="redoSemis">Redo semi-finals</button>');
   }
-  if (final && fresh(final)) buttons.push('<button data-act="redoFinal">Redo final</button>');
+  if (final && fresh(final) && (!playoff || fresh(playoff))) buttons.push(`<button data-act="redoFinal">Redo final${playoff ? ' and 3rd place match' : ''}</button>`);
   if (buttons.length) ko += `<div class="row ko-buttons">${buttons.join('')}</div>`;
   h += `<section class="card"><h2>Knockout</h2>${ko || ''}</section>`;
   h += `<details class="card"><summary>Rating changes so far</summary><p class="muted">Applied when you finish the tournament.</p>${changesList(night)}</details>`;
@@ -872,12 +878,20 @@ const actions = {
   makeFinal: () => {
     const night = openNight();
     const semis = night.matches.filter(m => m.stage === 'SF');
-    const [a, b] = semis.length ? semis.map(m => E.outcome(m).winner) : groupTables(night).flat().slice(0, 2).map(r => r.id);
-    update(`${night.date}: final made`, () => night.matches.push({ id: 'F', stage: 'F', a, b }), { throttle: true });
+    if (!semis.length) {
+      const [a, b] = groupTables(night).flat().slice(0, 2).map(r => r.id);
+      update(`${night.date}: final made`, () => night.matches.push({ id: 'F', stage: 'F', a, b }), { throttle: true });
+      return;
+    }
+    const results = semis.map(m => E.outcome(m));
+    update(`${night.date}: final and 3rd place match made`, () => {
+      night.matches.push({ id: '3P', stage: '3P', a: results[0].loser, b: results[1].loser });
+      night.matches.push({ id: 'F', stage: 'F', a: results[0].winner, b: results[1].winner });
+    }, { throttle: true });
   },
   redoFinal: () => {
     const night = openNight();
-    update(`${night.date}: final removed`, () => { night.matches = night.matches.filter(m => m.stage !== 'F'); }, { throttle: true });
+    update(`${night.date}: final removed`, () => { night.matches = night.matches.filter(m => m.stage !== 'F' && m.stage !== '3P'); }, { throttle: true });
   },
 
   closeNight: () => {

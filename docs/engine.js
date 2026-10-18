@@ -14,7 +14,9 @@ export const FINAL_BONUS = 15;
 export const WIN_BONUS = 20;
 
 export const GROUP_LABELS = ['A', 'B', 'C', 'D'];
-export const isGroupStage = stage => stage !== 'SF' && stage !== 'F';
+// Knockout stages: semi-finals (SF), 3rd place match (3P, the two semi losers) and final (F).
+export const KNOCKOUT_ORDER = { SF: 0, '3P': 1, F: 2 };
+export const isGroupStage = stage => !(stage in KNOCKOUT_ORDER);
 
 export function expected(rating, opponent) {
   return 1 / (1 + Math.pow(10, (opponent - rating) / 400));
@@ -113,7 +115,9 @@ function settleNight(night, ratingOf, kOf) {
   const champion = final ? outcome(final)?.winner ?? null : null;
   if (champion) reach(champion, WIN_BONUS);
   const runnerUp = champion ? (champion === final.a ? final.b : final.a) : null;
-  return { attendees, start, k, change, details, champion, runnerUp, placing };
+  const playoff = night.matches.find(m => m.stage === '3P');
+  const third = playoff ? outcome(playoff)?.winner ?? null : null;
+  return { attendees, start, k, change, details, champion, runnerUp, third, placing };
 }
 
 export function compute(data) {
