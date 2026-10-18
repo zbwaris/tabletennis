@@ -7,11 +7,8 @@ export const K_NORMAL = 16;
 export const K_NEW = 48;
 export const NEW_PLAYER_NIGHTS = 4;
 export const BONUS_WINDOW = 8;
+// The table's only bonus: attendance. Kept out of the rating so Elo stays zero-sum.
 export const ATTEND_BONUS = 5;
-// Placement bonus: reaching the knockout. Kept out of the rating so Elo stays zero-sum.
-export const SEMI_BONUS = 10;
-export const FINAL_BONUS = 15;
-export const WIN_BONUS = 20;
 
 export const GROUP_LABELS = ['A', 'B', 'C', 'D'];
 // Knockout stages: semi-finals (SF), 3rd place match (3P, the two semi losers) and final (F).
@@ -104,20 +101,13 @@ function settleNight(night, ratingOf, kOf) {
     details.set(m.id, { ...o, share, weight, expected: exp, gain, loss });
   }
 
-  // Placement: playing in a semi or the final counts as reaching it, even if it wasn't finished.
-  const placing = new Map();
-  const reach = (id, bonus) => placing.set(id, Math.max(placing.get(id) ?? 0, bonus));
-  for (const m of night.matches) {
-    if (m.stage === 'SF') { reach(m.a, SEMI_BONUS); reach(m.b, SEMI_BONUS); }
-    if (m.stage === 'F') { reach(m.a, FINAL_BONUS); reach(m.b, FINAL_BONUS); }
-  }
+  // Podium, for display only: it doesn't affect ratings or the table.
   const final = night.matches.find(m => m.stage === 'F');
   const champion = final ? outcome(final)?.winner ?? null : null;
-  if (champion) reach(champion, WIN_BONUS);
   const runnerUp = champion ? (champion === final.a ? final.b : final.a) : null;
   const playoff = night.matches.find(m => m.stage === '3P');
   const third = playoff ? outcome(playoff)?.winner ?? null : null;
-  return { attendees, start, k, change, details, champion, runnerUp, third, placing };
+  return { attendees, start, k, change, details, champion, runnerUp, third };
 }
 
 export function compute(data) {
@@ -150,17 +140,15 @@ export function compute(data) {
   const table = [], inactive = [];
   for (const p of data.players) {
     if (!first.has(p.id)) continue;
-    let attended = 0, missed = 0, knockout = 0;
+    let attended = 0, missed = 0;
     for (let i = Math.max(windowStart, first.get(p.id)); i < closed.length; i++) {
-      const info = nightInfo.get(closed[i].id);
-      info.attendees.has(p.id) ? attended++ : missed++;
-      knockout += info.placing.get(p.id) ?? 0;
+      nightInfo.get(closed[i].id).attendees.has(p.id) ? attended++ : missed++;
     }
-    const bonus = ATTEND_BONUS * (attended - missed) + knockout;
+    const bonus = ATTEND_BONUS * (attended - missed);
     const lastInfo = latest && nightInfo.get(latest.id);
     const row = {
       id: p.id, name: p.name, rating: ratingOf(p.id), nights: nightsOf(p.id),
-      attended, missed, knockout, bonus, ladder: ratingOf(p.id) + bonus,
+      attended, missed, bonus, ladder: ratingOf(p.id) + bonus,
       lastChange: lastInfo?.attendees.has(p.id) ? lastInfo.change.get(p.id) : null,
     };
     (attended ? table : inactive).push(row);

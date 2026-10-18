@@ -52,7 +52,7 @@ const formPills = (results, n = 5, big = false) =>
 const startRating = (info, id) => (info?.start.has(id) ? `<small class="rt">${Math.round(info.start.get(id))}</small>` : '');
 const tile = (label, value) => `<div class="tile"><span>${label}</span><b>${value}</b></div>`;
 const trophy = (cls = 'trophy') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v2h3v2a4 4 0 0 1-4 4h-.4A6 6 0 0 1 13 13.9V17h3v3H8v-3h3v-3.1A6 6 0 0 1 7.4 11H7a4 4 0 0 1-4-4V5h3V3Zm0 4H5a2 2 0 0 0 1.2 1.8L6 7Zm12 0-.2 1.8A2 2 0 0 0 19 7h-1Z"/></svg>`;
-const placeName = bonus => ({ [E.WIN_BONUS]: 'winner', [E.FINAL_BONUS]: 'finalist', [E.SEMI_BONUS]: 'semi-finalist' }[bonus]);
+const podiumName = (info, id) => (id === info.champion ? 'winner' : id === info.runnerUp ? 'runner-up' : id === info.third ? '3rd' : '');
 
 // Groups are seeded by table position: Score for players on the table, otherwise rating.
 function rankScore() {
@@ -182,8 +182,7 @@ function changesList(night) {
   const ids = [...info.attendees].sort((a, b) => info.change.get(b) - info.change.get(a));
   return ids.map(id => {
     const start = info.start.get(id), c = info.change.get(id);
-    const place = info.placing.get(id);
-    const notes = [place ? `${placeName(place)} +${place} bonus` : '', info.k.get(id) === E.K_NEW ? 'new · changes ×3' : ''].filter(Boolean).join(' · ');
+    const notes = [podiumName(info, id), info.k.get(id) === E.K_NEW ? 'new · changes ×3' : ''].filter(Boolean).join(' · ');
     return `<a class="ch-row" href="${playerHref(id)}">${who(id, notes)}<span class="flow">${Math.round(start)} → <b>${Math.round(start + c)}</b></span>${chg(c)}</a>`;
   }).join('');
 }
@@ -225,7 +224,7 @@ function viewTable() {
       ${inactive.map(r => `<a class="list-row" href="${playerHref(r.id)}"><span></span>${who(r.id)}<span class="val">${Math.round(r.rating)}<small>rating</small></span></a>`).join('')}</details>`;
   }
   if (table.length) {
-    h += `<p class="foot">Score = rating + bonus (shown under each name). The bonus counts the last 8 tournaments: +5 for each one attended, −5 for each one missed, and +${E.SEMI_BONUS} for reaching the semis, +${E.FINAL_BONUS} the final, +${E.WIN_BONUS} for winning. <a href="#/rules">How it works</a></p>`;
+    h += '<p class="foot">Score = rating + attendance bonus (shown under each name): +5 for each of the last 8 tournaments attended, −5 for each one missed. ★ = tournaments won. <a href="#/rules">How it works</a></p>';
   }
   return h;
 }
@@ -340,7 +339,7 @@ function viewPlayer(id) {
   h += `<div class="tiles">${tile('Score', Math.round(row.ladder))}${tile('Bonus', signed(row.bonus, 0))}${tile('Won–lost', s ? `${s.won}–${s.lost}` : '0–0')}
     ${tile('Win rate', s?.played ? pct(s.winPct) : '–')}${tile('Titles', s?.titles ?? 0)}${tile('Best streak', s?.bestStreak ?? 0)}</div>`;
   const left = E.NEW_PLAYER_NIGHTS - nightsOf(id);
-  h += `<p class="foot">Bonus over the last 8 tournaments: ${row.attended} attended (${signed(5 * row.attended, 0)}), ${row.missed} missed (${signed(-5 * row.missed, 0)}), knockout places ${signed(row.knockout, 0)}.${left > 0 ? ` New player: rating changes are tripled for ${plural(left, 'more tournament')}.` : ''}</p>`;
+  h += `<p class="foot">Attendance bonus over the last 8 tournaments: ${row.attended} attended (${signed(5 * row.attended, 0)}), ${row.missed} missed (${signed(-5 * row.missed, 0)}).${left > 0 ? ` New player: rating changes are tripled for ${plural(left, 'more tournament')}.` : ''}</p>`;
 
   if (s?.results.length) h += `<section class="card"><h2>Form <small>last ${Math.min(10, s.results.length)}</small></h2>${formPills(s.results, 10, true)}</section>`;
   const hist = history.get(id) || [];
@@ -442,15 +441,11 @@ Change   = K × Weight × (1 − Expected)</pre>
      kept between 0.75 and 0.95</pre>
     <p>Any 2-0 counts more than any 2-1, and the winner always gains.</p></section>
   <section class="card prose"><h2>The table</h2>
-    <p>Score = rating + bonus. The bonus counts the last 8 tournaments:</p>
-    <pre class="formula">Attended            +5 each
-Missed              −5 each
-Reached the semis   +${E.SEMI_BONUS}
-Reached the final   +${E.FINAL_BONUS}
-Won the tournament  +${E.WIN_BONUS}</pre>
-    <p>Missed tournaments only count from your first one. The knockout bonus makes up for the rating a semi-final loss costs, so reaching the knockout never leaves you worse off. No tournament in the last 8 takes you off the table, but your rating is kept.</p></section>
+    <p>Score = rating + attendance bonus. The bonus counts the last 8 tournaments: +5 for each one attended, −5 for each one missed (only since your first one), so it runs from −40 to +40.</p>
+    <p>Your rating never drops while you're away; it just stops being tested. The bonus is what moves regulars above equally good players who come less often. No tournament in the last 8 takes you off the table, but your rating is kept for when you return.</p>
+    <p>Finishing places (winner, runner-up, 3rd) are honours, shown as ★ titles and on each tournament. They don't add points: the rating already counts every match it took to get there.</p></section>
   <section class="card prose"><h2>A tournament</h2>
-    <p>From 4 players: two groups, seeded by the table in a snake (1st, 4th, 5th, 8th… in A; 2nd, 3rd, 6th, 7th… in B) so both are equally strong. Then semis A1 v B2 and B1 v A2, and the final. With fewer than 4 players: one group, then a final between the top 2. Group places go by matches won, then head-to-head, then game difference, then points difference.</p></section>
+    <p>From 4 players: two groups, seeded by the table in a snake (1st, 4th, 5th, 8th… in A; 2nd, 3rd, 6th, 7th… in B) so both are equally strong. Then semis A1 v B2 and B1 v A2, a 3rd place match between the semi losers, and the final. Every match is rated the same way. With fewer than 4 players: one group, then a final between the top 2. Group places go by matches won, then head-to-head, then game difference, then points difference.</p></section>
   <section class="card"><h2>Try a match</h2>
     <form class="calc" id="calc">
       <label class="field">Player A rating <input name="ra" type="number" value="1000" inputmode="numeric"></label>
@@ -899,7 +894,7 @@ const actions = {
     const pending = night.matches.filter(m => !E.isSettled(m)).length;
     const msg = `Finish the ${fmtDate(night.date)} tournament and update everyone's ratings?` +
       (pending ? `\n\n${plural(pending, 'match', 'matches')} with no result won't count.` : '') +
-      (night.matches.some(m => m.stage === 'F') ? '' : '\n\nThere is no final, so no knockout bonuses.');
+      (night.matches.some(m => m.stage === 'F') ? '' : '\n\nThere is no final yet, so there will be no winner.');
     if (!confirm(msg)) return;
     update(`Finish tournament ${night.date}`, () => { night.closed = true; });
     location.hash = nightHref(night.id);
