@@ -7,8 +7,10 @@ export const K_NORMAL = 16;
 export const K_NEW = 48;
 export const NEW_PLAYER_NIGHTS = 4;
 export const BONUS_WINDOW = 8;
-// The table's only bonus: attendance. Kept out of the rating so Elo stays zero-sum.
-export const ATTEND_BONUS = 5;
+// The table's only bonus: attendance, deliberately strong because participation is what the
+// club wants to reward. A missed tournament costs 2 × 20 = 40 against attending, about two bad
+// nights. Kept out of the rating so Elo stays zero-sum and every match is scored fairly.
+export const ATTEND_BONUS = 20;
 
 export const GROUP_LABELS = ['A', 'B', 'C', 'D'];
 // Knockout stages: semi-finals (SF), 3rd place match (3P, the two semi losers) and final (F).

@@ -224,7 +224,7 @@ function viewTable() {
       ${inactive.map(r => `<a class="list-row" href="${playerHref(r.id)}"><span></span>${who(r.id)}<span class="val">${Math.round(r.rating)}<small>rating</small></span></a>`).join('')}</details>`;
   }
   if (table.length) {
-    h += '<p class="foot">Score = rating + attendance bonus (shown under each name): +5 for each of the last 8 tournaments attended, −5 for each one missed. ★ = tournaments won. <a href="#/rules">How it works</a></p>';
+    h += `<p class="foot">Score = rating + attendance bonus (shown under each name): +${E.ATTEND_BONUS} for each of the last ${E.BONUS_WINDOW} tournaments attended, −${E.ATTEND_BONUS} for each one missed. ★ = tournaments won. <a href="#/rules">How it works</a></p>`;
   }
   return h;
 }
@@ -339,7 +339,7 @@ function viewPlayer(id) {
   h += `<div class="tiles">${tile('Score', Math.round(row.ladder))}${tile('Bonus', signed(row.bonus, 0))}${tile('Won–lost', s ? `${s.won}–${s.lost}` : '0–0')}
     ${tile('Win rate', s?.played ? pct(s.winPct) : '–')}${tile('Titles', s?.titles ?? 0)}${tile('Best streak', s?.bestStreak ?? 0)}</div>`;
   const left = E.NEW_PLAYER_NIGHTS - nightsOf(id);
-  h += `<p class="foot">Attendance bonus over the last 8 tournaments: ${row.attended} attended (${signed(5 * row.attended, 0)}), ${row.missed} missed (${signed(-5 * row.missed, 0)}).${left > 0 ? ` New player: rating changes are tripled for ${plural(left, 'more tournament')}.` : ''}</p>`;
+  h += `<p class="foot">Attendance bonus over the last 8 tournaments: ${row.attended} attended (${signed(E.ATTEND_BONUS * row.attended, 0)}), ${row.missed} missed (${signed(-E.ATTEND_BONUS * row.missed, 0)}).${left > 0 ? ` New player: rating changes are tripled for ${plural(left, 'more tournament')}.` : ''}</p>`;
 
   if (s?.results.length) h += `<section class="card"><h2>Form <small>last ${Math.min(10, s.results.length)}</small></h2>${formPills(s.results, 10, true)}</section>`;
   const hist = history.get(id) || [];
@@ -441,8 +441,8 @@ Change   = K × Weight × (1 − Expected)</pre>
      kept between 0.75 and 0.95</pre>
     <p>Any 2-0 counts more than any 2-1, and the winner always gains.</p></section>
   <section class="card prose"><h2>The table</h2>
-    <p>Score = rating + attendance bonus. The bonus counts the last 8 tournaments: +5 for each one attended, −5 for each one missed (only since your first one), so it runs from −40 to +40.</p>
-    <p>Your rating never drops while you're away; it just stops being tested. The bonus is what moves regulars above equally good players who come less often. No tournament in the last 8 takes you off the table, but your rating is kept for when you return.</p>
+    <p>Score = rating + attendance bonus. This is a club where turning up counts, so the bonus is strong. It counts the last ${E.BONUS_WINDOW} tournaments: +${E.ATTEND_BONUS} for each one attended, −${E.ATTEND_BONUS} for each one missed (only since your first one), so it runs from −${E.ATTEND_BONUS * E.BONUS_WINDOW} to +${E.ATTEND_BONUS * E.BONUS_WINDOW}.</p>
+    <p>Missing a tournament costs ${2 * E.ATTEND_BONUS} against someone who came, more than a bad night usually costs. Your rating itself never drops while you're away, so your matches are still scored fairly when you're back, but you'll sit lower on the table until you've been coming again. No tournament in the last 8 takes you off the table, but your rating is kept for when you return.</p>
     <p>Finishing places (winner, runner-up, 3rd) are honours, shown as ★ titles and on each tournament. They don't add points: the rating already counts every match it took to get there.</p></section>
   <section class="card prose"><h2>A tournament</h2>
     <p>From 4 players: two groups, seeded by the table in a snake (1st, 4th, 5th, 8th… in A; 2nd, 3rd, 6th, 7th… in B) so both are equally strong. Then semis A1 v B2 and B1 v A2, a 3rd place match between the semi losers, and the final. Every match is rated the same way. With fewer than 4 players: one group, then a final between the top 2. Group places go by matches won, then head-to-head, then game difference, then points difference.</p></section>
